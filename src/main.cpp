@@ -368,7 +368,7 @@ void updateR_T(Vector3d& w, Vector3d& v)
 	//T = newT;
 }
 
-testDataGenerator TDG;
+//testDataGenerator TDG;
 Mat rgbImage, depthImage;
 Mat grayImage[maxPyramidLevel];
 STATE tmpState;

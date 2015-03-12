@@ -108,7 +108,7 @@ include_directories(
 # )
 
 ## Declare a cpp executable
-add_executable(dense_vo_node src/main.cpp)
+add_executable(dense_vo_node src/denseVO.cpp)
 #rosbuild_add_openmp_flags(IROS2015_node)
 
 ## Add cmake target dependencies of the executable/library
