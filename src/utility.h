@@ -1,0 +1,72 @@
+#ifndef __UTILITY_H
+#define __UTILITY_H
+
+#include "variableDefinition.h"
+#include <vector>
+#include <algorithm>
+
+const int dx[4] = { 0, 0, -1, 1 };//up down left right
+const int dy[4] = { -1, 1, 0, 0 };//up down left right
+const int dx8[8] = { -1, -1, 0, 1, 1, 1, 0, -1 };
+const int dy8[8] = { 0, -1, -1, -1, 0, 1, 1, 1 };
+
+#define	INDEX(i, j, n, m)		( (i)*(m) + (j)  )
+
+inline double SQ(double a){
+	return a*a;
+}
+
+inline bool linearIntepolation(double y, double x, unsigned char* pIntensity , int n, int m, double& result )
+{
+	int leftTopY = floorf(y);
+	int leftTopX = floorf(x);
+	if (leftTopX < 0 || leftTopY < 0){
+		return false;
+	}
+	int rightDownY = leftTopY + 1;
+	int rightDownX = leftTopX + 1;
+	if (rightDownY >= n || rightDownX >= m){
+		return false;
+	}
+	const double subpix_u_cur = y - leftTopY;
+	const double subpix_v_cur = x - leftTopX;
+	const double w_cur_tl = (1.0 - subpix_u_cur) * (1.0 - subpix_v_cur);
+	const double w_cur_tr = subpix_u_cur * (1.0 - subpix_v_cur);
+	const double w_cur_bl = (1.0 - subpix_u_cur) * subpix_v_cur;
+	const double w_cur_br = subpix_u_cur * subpix_v_cur;
+
+	result = w_cur_tl*pIntensity[INDEX(leftTopY, leftTopX, n, m)]
+		+ w_cur_tr*pIntensity[INDEX(leftTopY, rightDownX, n, m)]
+		+ w_cur_bl*pIntensity[INDEX(rightDownY, leftTopX, n, m)]
+		+ w_cur_br*pIntensity[INDEX(rightDownY, rightDownX, n, m)];
+
+	return true;
+}
+
+inline int findMaxContinousLength(std::vector<int>& b, int n, int& maxNum )
+{
+	maxNum = 1;
+	int maxValue = b[0];
+	int cnt = 1;
+	int currentValue = b[0];
+	for (int i = 1; i < n; i++)
+	{
+		if (b[i] == currentValue )
+		{
+			cnt++;
+			if (cnt > maxNum )
+			{
+				maxNum = cnt;
+				maxValue = b[i];
+			}
+		}
+		else
+		{
+			cnt = 1;
+			currentValue = b[i];
+		}
+	}
+	return maxValue;
+}
+
+#endif
