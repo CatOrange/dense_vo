@@ -468,7 +468,6 @@ public:
 	{
 		head = 0;
 		tail = -1;
-		STATE* frameHead = NULL;
 		for (int i = 0; i < slidingWindowSize; i++)
 		{
 			//states[i].pts = NULL;
@@ -775,9 +774,9 @@ public:
 			int currentStateID = iter->stateID ;
 			const SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
 
-			double totalError = 0.0;
+      //double totalError = 0.0;
 			int sz = currentSuperpixel.listOfU.size();
-			unsigned char* pIntensity = states[currentStateID].intensity[level];
+      //unsigned char* pIntensity = states[currentStateID].intensity[level];
 
 			Vector3d p0 = iter->pk[0] * iter->lambda[0];
 			Vector3d p1 = iter->pk[1] * iter->lambda[1];
@@ -786,7 +785,7 @@ public:
 			Vector3d p01 = p1 - p0;
 			MatrixXd normalT = p02.cross(p01).transpose();
 			MatrixXd numerotor = normalT*p0;
-			bool flag = false ;
+      //bool flag = false ;
 			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
 			{
 				Vector3d u_e;
@@ -1024,9 +1023,9 @@ public:
 		{
 			int n = height >> level;
 			int m = width >> level;
-			float* pDepth = current->depthImage[level];
-			double* pGradientX = current->gradientX[level];
-			double* pGradientY = current->gradientY[level];
+//			float* pDepth = current->depthImage[level];
+//			double* pGradientX = current->gradientX[level];
+//			double* pGradientY = current->gradientY[level];
 			unsigned char* pIntensity = current->intensity[level];
 			unsigned char *nextIntensity = (unsigned char*)grayImage[level].data;
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
@@ -1335,7 +1334,7 @@ public:
 		int n = height >> level;
 		int m = width >> level;
 		int readyNum = 0;
-		printf("before precheck SP_NUM:%d\n", superpixelList.size());
+    printf("before precheck SP_NUM:%d\n", (int)superpixelList.size());
 		for (std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter = superpixelList.begin();
 			iter != superpixelList.end(); )
 		{
@@ -1368,8 +1367,8 @@ public:
 					linkStateID -= slidingWindowSize;
 				}
 				unsigned char *nextIntensity = states[linkStateID].intensity[level];
-				double* nextGradientX = states[linkStateID].gradientX[level];
-				double* nextGradientY = states[linkStateID].gradientY[level];
+//				double* nextGradientX = states[linkStateID].gradientX[level];
+//				double* nextGradientY = states[linkStateID].gradientY[level];
 
 				int validNum = 0;
 				bool flag = true;
@@ -1397,13 +1396,13 @@ public:
 					double lambda = numerotor(0, 0) / denorminator(0, 0);
 					Vector3d pi = lambda * u_e;
 
-					double up = iter->lambda[0] * iter->lambda[1] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
-						+ SQ(iter->lambda[0])*  iter->lambda[2] * iter->u0xu2_T_u0(0, 0)
-						+ SQ(iter->lambda[0])* iter->lambda[1] * iter->u0xu1_T_u0(0, 0);
+//					double up = iter->lambda[0] * iter->lambda[1] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
+//						+ SQ(iter->lambda[0])*  iter->lambda[2] * iter->u0xu2_T_u0(0, 0)
+//						+ SQ(iter->lambda[0])* iter->lambda[1] * iter->u0xu1_T_u0(0, 0);
 
-					double down = iter->lambda[1] * iter->lambda[2] * (iter->u1xu2_T*u_e)(0, 0)
-						+ iter->lambda[0] * iter->lambda[2] * (iter->u0xu2_T*u_e)(0, 0)
-						+ iter->lambda[0] * iter->lambda[1] * (iter->u0xu1_T*u_e)(0, 0);
+//					double down = iter->lambda[1] * iter->lambda[2] * (iter->u1xu2_T*u_e)(0, 0)
+//						+ iter->lambda[0] * iter->lambda[2] * (iter->u0xu2_T*u_e)(0, 0)
+//						+ iter->lambda[0] * iter->lambda[1] * (iter->u0xu1_T*u_e)(0, 0);
 
 					Vector3d pj = R[linkStateID].transpose()*(T[currentStateID] - T[linkStateID] + R[currentStateID] * pi);
 					if (pj(2) < zeroThreshold){
@@ -1534,7 +1533,7 @@ public:
 					//}
 					int currentStateID = iter->stateID;
 					const SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
-					unsigned char* pIntensity = states[currentStateID].intensity[level];
+//					unsigned char* pIntensity = states[currentStateID].intensity[level];
 					int sz = currentSuperpixel.listOfU_.size();
 
 #ifdef DEBUG_BA
@@ -2048,13 +2047,13 @@ public:
 		R.clear();
 		G.clear();
 		B.clear();
-		int n = height;
-		int m = width;
+//		int n = height;
+//		int m = width;
 		int level = 0;
 		std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter;
 		for (iter = superpixelList.begin(); iter != superpixelList.end(); iter++)
 		{
-			int currentStateID = iter->stateID;
+//			int currentStateID = iter->stateID;
 			const SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
 
 			Vector3d p0 = iter->pk[0] * iter->lambda[0];

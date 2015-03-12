@@ -242,7 +242,7 @@ public:
 
 	void runClustering(int K, int iterNum)
 	{
-		double t = (double)cvGetTickCount();
+    //double t = (double)cvGetTickCount();
 
 		initNormalMap();
 		initSeeds(K);

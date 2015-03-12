@@ -166,7 +166,7 @@ public:
 		int nn = n - 1;
 		int mm = m - 1;
 
-		double maxValue = 0;
+    //double maxValue = 0;
 
 		//distance tranform
 		for (int i = 1; i < nn; i++)

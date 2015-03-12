@@ -6,7 +6,7 @@ SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -Ofast -march=native -mtune=native 
 SET(OpenCV_INCLUDE_DIRS "/usr/include/opencv;/usr/include/opencv2")
 
 find_package(catkin REQUIRED COMPONENTS
-#  OpenCV
+  OpenCV
   roscpp
   rospy
   std_msgs
@@ -100,6 +100,7 @@ catkin_package(
 include_directories(
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
+  ${OPENNI2_INCLUDE}
 )
 
 ## Declare a cpp library
@@ -119,6 +120,7 @@ add_executable(dense_vo_node src/denseVO.cpp)
 target_link_libraries(dense_vo_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
+  OpenNI2
  # ${Boost_FILESYSTEM_LIBRARY} 
  # ${Boost_SYSTEM_LIBRARY}
 )
