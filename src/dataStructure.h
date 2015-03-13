@@ -183,10 +183,11 @@ struct CAMER_PARAMETERS
 
 		initPyramidParameters();
 
-		cameraMatrix.at<double>(0, 0) = input_fx;
-		cameraMatrix.at<double>(0, 2) = input_cx;
-		cameraMatrix.at<double>(1, 1) = input_fy;
-		cameraMatrix.at<double>(1, 2) = input_cy;
+    cameraMatrix.at<double>(0, 0) = input_fx;
+    cameraMatrix.at<double>(0, 2) = input_cx;
+    cameraMatrix.at<double>(1, 1) = input_fy;
+    cameraMatrix.at<double>(1, 2) = input_cy;
+    cameraMatrix.at<double>(2, 2) = 1.0;
 	}
 
 	void setDistortionCoff( double d0, double d1, double d2, double d3, double d4)

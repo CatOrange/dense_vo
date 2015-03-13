@@ -62,115 +62,42 @@ STATEESTIMATION slidingWindows(IMAGE_HEIGHT, IMAGE_WIDTH, &cameraParameters);
 Matrix3d firstFrameRtoVICON;
 Vector3d firstFrameTtoVICON;
 
-PrimeSenseCam cam;
+//PrimeSenseCam cam;
 
-geometry_msgs::PoseStamped poseROS;
-nav_msgs::Path             pathROS;
-
-ros::Publisher pubVOdom ;
-ros::Publisher pubCloud ;
-ros::Publisher pubPoses ;
-ros::Publisher marker_pub ;
+ros::Publisher pub_path ;
+ros::Publisher pub_odometry ;
+ros::Publisher pub_pose ;
+ros::Publisher pub_cloud ;
+image_transport::Publisher pub_grayImage ;
+image_transport::Publisher pub_depthImage ;
+image_transport::Subscriber sub_image;
+image_transport::Subscriber sub_depth;
+visualization_msgs::Marker path_line;
 
 Mat rgbImage, depthImage;
 Mat grayImage[maxPyramidLevel];
 STATE tmpState;
 STATE* lastFrame;
 
-/*
-// Current VINS odometry
-void publish_current(const Vector3d& p,
-                     const Vector3d& v,
-                     const Matrix3d& R,
-                     const ros::Time t )
+bool vst = false;
+Matrix3d R_k_c;//R_k^(k+1)
+Matrix3d R_c_0;
+Vector3d T_k_c;//T_k^(k+1)
+Vector3d T_c_0;
+
+Vector3d R_to_ypr(const Matrix3d& R)
 {
-  nav_msgs::Odometry odom;
-  Quaterniond q = Quaterniond(R);
-  odom.header.stamp    = t;
-  odom.header.frame_id = string("/map");
-  odom.pose.pose.position.x = p(0);
-  odom.pose.pose.position.y = p(1);
-  odom.pose.pose.position.z = p(2);
-  odom.pose.pose.orientation.w = q.w();
-  odom.pose.pose.orientation.x = q.x();
-  odom.pose.pose.orientation.y = q.y();
-  odom.pose.pose.orientation.z = q.z();
-  odom.twist.twist.linear.x = v(0);
-  odom.twist.twist.linear.y = v(1);
-  odom.twist.twist.linear.z = v(2);
-//  odom.twist.twist.angular.x = imuImage.w(0);
-//  odom.twist.twist.angular.y = imuImage.w(1);
-//  odom.twist.twist.angular.z = imuImage.w(2);
-//  odom.twist.covariance[0]  = stats[0];
-//  odom.twist.covariance[1]  = stats[1];
-//  odom.twist.covariance[2]  = stats[2];
-//  odom.twist.covariance[3]  = stats[3];
-//  odom.twist.covariance[33] = imuImage.a(0);
-//  odom.twist.covariance[34] = imuImage.a(1);
-//  odom.twist.covariance[35] = imuImage.a(2);
-  pubVOdom.publish(odom);
-}
-*/
-
-// Current pointcloud and all poses in the window
-void publish_all(const vector<Vector3d>& pointcloud,
-                 const vector<unsigned short>& R,
-                 const vector<unsigned short>& G,
-                 const vector<unsigned short>& B,
-                 const vector<Vector3d>& ps,
-                 const vector<Matrix3d>& Rs,
-                 const ros::Time         t,
-                 const Matrix3d& currentR,
-                 const Vector3d& currentT )
-{
-    sensor_msgs::PointCloud cloud;
-    cloud.header.stamp    = t;
-    cloud.header.frame_id = string("/map");
-    cloud.points.resize(pointcloud.size());
-    cloud.channels.resize(1) ;
-    cloud.channels[0].name = "rgb" ;
-    cloud.channels[0].values.resize( pointcloud.size() ) ;
-    for (unsigned int k = 0; k < pointcloud.size(); k++)
-    {
-        cloud.points[k].x = pointcloud[k](0);
-        cloud.points[k].y = pointcloud[k](1);
-        cloud.points[k].z = pointcloud[k](2);
-        int rgb = (R[k]<<16) | (G[k]<<8) | B[k] ;
-        cloud.channels[0].values[k] = *reinterpret_cast<float*>(&rgb) ;
-    }
-
-    geometry_msgs::PoseArray poses;
-    poses.header.stamp    = t;
-    poses.header.frame_id = string("/map");
-    poses.poses.resize(ps.size()+1);
-    unsigned int k ;
-    for ( k = 0; k < ps.size(); k++)
-    {
-        poses.poses[k].position.x = ps[k](0);
-        poses.poses[k].position.y = ps[k](1);
-        poses.poses[k].position.z = ps[k](2);
-        Quaterniond q = Quaterniond(Rs[k]);
-        poses.poses[k].orientation.w = q.w();
-        poses.poses[k].orientation.x = q.x();
-        poses.poses[k].orientation.y = q.y();
-        poses.poses[k].orientation.z = q.z();
-    }
-    poses.poses[k].position.x = currentT(0);
-    poses.poses[k].position.y = currentT(1);
-    poses.poses[k].position.z = currentT(2);
-    Quaterniond q = Quaterniond(currentR.transpose());
-    poses.poses[k].orientation.w = q.w();
-    poses.poses[k].orientation.x = q.x();
-    poses.poses[k].orientation.y = q.y();
-    poses.poses[k].orientation.z = q.z();
-
-    printf("[pub] pointCloud Size:%d Pose Size:%d\n", pointcloud.size(), k+1 ) ;
-    for ( int i = 0 ; i <= k ; i++ ){
-        printf("Pose: %d x:%f y:%f z:%f\n", i, poses.poses[i].position.x, poses.poses[i].position.y, poses.poses[i].position.z ) ;
-    }
-
-    pubCloud.publish(cloud);
-    pubPoses.publish(poses);
+  Vector3d n = R.col(0);
+  Vector3d o = R.col(1);
+  Vector3d a = R.col(2);
+  Vector3d ypr(3);
+  double y = atan2(n(1), n(0));
+  double p = atan2(-n(2), n(0) * cos(y) + n(1) * sin(y));
+  double r = atan2(a(0) * sin(y) - a(1) * cos(y), -o(0) * sin(y) + o(1) * cos(y));
+  ypr(0) = y;
+  ypr(1) = p;
+  ypr(2) = r;
+  return 180.0 / PI * ypr;
 }
 
 void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
@@ -197,28 +124,72 @@ void RtoEulerAngles(Matrix3d R, double a[3])
     a[2] = (R(1, 0) - R(0, 1)) / (2.0* sin(theta));
 }
 
-int main(int argc, char** argv )
+void initCalibrationParameters()
 {
-    ros::init(argc, argv, "densevo") ;
-    ros::NodeHandle n ;
-    image_transport::ImageTransport it(n) ;
-    image_transport::Publisher pubImage = it.advertise("camera/image", 1 ) ;
+    FileStorage fs("/home/nova/calibration/camera_rgbd_sensor.yml", FileStorage::READ);
 
-    pubVOdom = n.advertise<nav_msgs::Odometry>(      "vodom",           10);
-    pubCloud = n.advertise<sensor_msgs::PointCloud>( "cloud",           10, true);
-    pubPoses = n.advertise<geometry_msgs::PoseArray>( "poses",           10, true);
-    marker_pub = n.advertise<visualization_msgs::Marker>( "visualization_marker", 1 ) ;
+    Mat cameraMatrix ;
+    Mat distortionCoff ;
 
+    if (fs.isOpened() == false ){
+        puts("Can not open") ;
+        return ;
+    }
+
+    fs["camera_matrix"] >> cameraMatrix ;
+    fs["distortion_coefficients"] >> distortionCoff ;
+
+    cameraParameters.cameraMatrix = cameraMatrix ;
+    cameraParameters.setParameters(
+                cameraMatrix.at<double>(0, 0), cameraMatrix.at<double>(1, 1),
+                cameraMatrix.at<double>(0, 2), cameraMatrix.at<double>(1, 2));
+    cameraParameters.distCoeffs = distortionCoff ;
+
+    fs.release();
+}
+
+void pubOdometry(const Vector3d& p, const Matrix3d& R )
+{
+    nav_msgs::Odometry odometry;
+    Quaterniond q(R) ;
+
+    odometry.header.stamp = ros::Time::now();
+    odometry.header.frame_id = "world";
+    odometry.pose.pose.position.x = p(0);
+    odometry.pose.pose.position.y = p(1);
+    odometry.pose.pose.position.z = p(2);
+    odometry.pose.pose.orientation.x = q.x();
+    odometry.pose.pose.orientation.y = q.y();
+    odometry.pose.pose.orientation.z = q.z();
+    odometry.pose.pose.orientation.w = q.w();
+    pub_odometry.publish(odometry);
+
+    geometry_msgs::PoseStamped pose_stamped;
+    pose_stamped.header.stamp = ros::Time::now();
+    pose_stamped.header.frame_id = "world";
+    pose_stamped.pose = odometry.pose.pose;
+    pub_pose.publish(pose_stamped);
+}
+
+void pubPath(const Vector3d& p)
+{
+    geometry_msgs::Point pose_p;
+    pose_p.x = p(0);
+    pose_p.y = p(1);
+    pose_p.z = p(2);
+
+    path_line.points.push_back(pose_p);
+    path_line.scale.x = 0.01 ;
+    pub_path.publish(path_line);
+}
+/*
+bool fun()
+{
     ros::Rate loop_rate(0.1) ;
-    bool vst = false;
-    Matrix3d R_k_c;//R_k^(k+1)
-    Matrix3d R_c_0;
-    Vector3d T_k_c;//T_k^(k+1)
-    Vector3d T_c_0;
+
     Mat rgbImage, depthImage;
     //ofstream fileOutput("result.txt");
 
-    cam.start();
     for ( int i = 1; ros::ok() ; i += 1 )
     {
         printf("id : %d\n", i);
@@ -230,10 +201,15 @@ int main(int argc, char** argv )
 #ifdef DOWNSAMPLING
         pyrDown(grayImage[0], grayImage[0]);//down-sampling
 #endif
-
         for (int kk = 1; kk < maxPyramidLevel; kk++){
             pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
         }
+
+        sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", grayImage[0]).toImageMsg() ;
+        pub_grayImage.publish( msg ) ;
+
+        sensor_msgs::ImagePtr msg2 = cv_bridge::CvImage(std_msgs::Header(), "mono16", depthImage).toImageMsg() ;
+        pub_depthImage.publish( msg2 ) ;
 
         depthImage.convertTo(depthImage, CV_32F );
 
@@ -244,15 +220,6 @@ int main(int argc, char** argv )
         if (vst == false )//the first frame
         {
             vst = true;
-//            Quaterniond q;
-//            q.x() = groundTruth[timeID].qx;
-//            q.y() = groundTruth[timeID].qy;
-//            q.z() = groundTruth[timeID].qz;
-//            q.w() = groundTruth[timeID].qw;
-//            firstFrameRtoVICON = q.toRotationMatrix();
-//            firstFrameTtoVICON << groundTruth[timeID].tx, groundTruth[timeID].ty, groundTruth[timeID].tz;
-
-            //cout << firstFrameTtoVICON << endl;
 
             slidingWindows.insertKeyFrame(grayImage, depthImage, Matrix3d::Identity(), Vector3d::Zero() );
             slidingWindows.planeDection();
@@ -277,6 +244,11 @@ int main(int argc, char** argv )
         T_c_0 = R_c_0*(
             R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
 
+        pubOdometry(T_c_0, R_c_0);
+        pubPath(T_c_0);
+
+        cout << "currentPosition:\n" << T_c_0.transpose() << endl;
+
         if ((i % 10) == 1)
         {
             slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
@@ -298,8 +270,8 @@ int main(int argc, char** argv )
 
             lastFrame = &slidingWindows.states[slidingWindows.tail];
 
-            cout << "estimate position[after BA]:\n"
-                << slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
+//            cout << "estimate position[after BA]:\n"
+//                << slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
 
 //            Vector3d groundTruthT;
 //            groundTruthT << groundTruth[timeID].tx, groundTruth[timeID].ty, groundTruth[timeID].tz;
@@ -358,6 +330,166 @@ int main(int argc, char** argv )
         //imshow("image",  grayImage[0]) ;
         //waitKey(30) ;
     }
+
+    return true ;
+}
+*/
+void init()
+{
+    //initCalibrationParameters() ;
+    //cam.start();
+}
+
+int cnt = 0;
+
+void estimateCurrentState()
+{
+    cnt++ ;
+    if (vst == false )//the first frame
+    {
+        vst = true;
+
+        slidingWindows.insertKeyFrame(grayImage, depthImage, Matrix3d::Identity(), Vector3d::Zero() );
+        //slidingWindows.planeDection();
+
+        R_k_c = Matrix3d::Identity();
+        T_k_c = Vector3d::Zero();
+
+        lastFrame = &slidingWindows.states[slidingWindows.tail];
+        cnt = 1 ;
+        return ;
+    }
+
+    //double t = (double)cvGetTickCount();
+
+    frameToFrameDenseTracking(R_k_c, T_k_c );
+    //keyframeToFrameDenseTracking(R_k_c, T_k_c );
+
+    //t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
+    //printf("cal time: %f\n", t);
+
+    R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
+    T_c_0 = R_c_0*(
+                R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
+
+    if ((cnt % 10) == 1)
+    {
+        slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
+
+        pubOdometry(T_c_0, R_c_0);
+        pubPath(T_c_0);
+        cout << cnt/10 << "-" << "currentPosition:\n" << T_c_0.transpose() << endl;
+
+        R_k_c = Matrix3d::Identity();
+        T_k_c = Vector3d::Zero();
+        lastFrame = &slidingWindows.states[slidingWindows.tail];
+    }
+    else
+    {
+        lastFrame = &tmpState;
+        tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
+    }
+}
+
+int rgbImageNum = 0 ;
+
+void rgbImageCallBack(const sensor_msgs::ImageConstPtr& msg)
+{
+    //cout << "rgb: " << msg->header.stamp << endl ;
+    //cout << "rgbImageNum = " << rgbImageNum++ << endl ;
+    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
+    cvtColor(cv_ptr->image, grayImage[0], CV_BGR2GRAY);
+
+#ifdef DOWNSAMPLING
+    pyrDown(grayImage[0], grayImage[0]);//down-sampling
+#endif
+
+    for (int kk = 1; kk < maxPyramidLevel; kk++){
+        pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
+    }
+    if ( depthImage.rows != grayImage[0].rows || depthImage.cols != grayImage[0].cols ){
+        return ;
+    }
+
+    depthImage.convertTo(depthImage, CV_32F );
+    //depthImage /= depthFactor;
+
+#ifdef DOWNSAMPLING
+    pyrDown(depthImage, depthImage ) ;
+#endif
+
+    estimateCurrentState() ;
+}
+
+
+void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
+{
+    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8);
+    grayImage[0] = cv_ptr->image.clone() ;
+
+#ifdef DOWNSAMPLING
+    pyrDown(grayImage[0], grayImage[0]);//down-sampling
+#endif
+
+    for (int kk = 1; kk < maxPyramidLevel; kk++){
+        pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
+    }
+    if ( depthImage.rows != grayImage[0].rows || depthImage.cols != grayImage[0].cols ){
+        return ;
+    }
+
+    depthImage.convertTo(depthImage, CV_32F );
+
+#ifdef DOWNSAMPLING
+    pyrDown(depthImage, depthImage ) ;
+#endif
+
+    estimateCurrentState() ;
+}
+
+void depthImageCallBack(const sensor_msgs::ImageConstPtr& msg)
+{
+    //cout << "depth: " << msg->header.stamp << endl ;
+    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::TYPE_32FC1 );
+    depthImage = cv_ptr->image.clone() ;
+}
+
+int main(int argc, char** argv )
+{
+    //init() ;
+    ros::init(argc, argv, "denseVO") ;
+    ros::NodeHandle n ;
+    //ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug);
+    image_transport::ImageTransport it(n) ;
+
+    //sub_image = it.subscribe("camera/grayImage", 1, &grayImageCallBack);
+    sub_image = it.subscribe("/camera/rgb/image_color", 1, &rgbImageCallBack);
+    sub_depth = it.subscribe("/camera/depth/image", 1, &depthImageCallBack);
+
+    pub_path = n.advertise<visualization_msgs::Marker>("/denseVO/path", 1000);;
+    pub_odometry = n.advertise<nav_msgs::Odometry>("/denseVO/odometry", 1000);;
+    pub_pose = n.advertise<geometry_msgs::PoseStamped>("/denseVO/pose", 1000);
+    pub_cloud = n.advertise<sensor_msgs::PointCloud>("/denseVO/cloud", 1000);
+
+    //pub_grayImage = it.advertise("camera/grayImage", 1 );
+    //pub_depthImage = it.advertise("camera/depthImage", 1 ) ;
+
+    path_line.header.frame_id    = "world";
+    path_line.header.stamp       = ros::Time::now();
+    path_line.ns                 = "dense_vo";
+    path_line.action             = visualization_msgs::Marker::ADD;
+    path_line.pose.orientation.w = 1.0;
+    path_line.type               = visualization_msgs::Marker::LINE_STRIP;
+    path_line.scale.x            = 0.01 ;
+    path_line.color.a            = 1.0;
+    path_line.color.r            = 1.0;
+    path_line.id                 = 1;
+    path_line.points.push_back( geometry_msgs::Point());
+    pub_path.publish(path_line);
+
+    //fun() ;
+
+    ros::spin();
 
     return 0;
 }

@@ -2,7 +2,7 @@
 #define __VARIABLEDEFINIATION_H
 #include <cmath>
 
-//#define DOWNSAMPLING
+#define DOWNSAMPLING
 
 //#define SAVEVIDEO
 
@@ -62,8 +62,8 @@ const double validPixelPercentageThreshold = 0.5;
 //for dense tracking
 //#define DEBUG_DENSETRACKING
 const double updateThreshold = 0.0005;
-const int maxIteration = 10;
-const int maxPyramidLevel = 5;
+const int maxIteration = 5 ;
+const int maxPyramidLevel = 4;
 
 //For reprojection
 const int expectedClusteringNum = 200;

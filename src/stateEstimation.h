@@ -1435,7 +1435,7 @@ public:
 					iter->ready = true;
 					//iter->reprojectList.push_back(linkStateID);
 
-					if (iter->reprojectList.size() == j - 1){
+          if ( (int)iter->reprojectList.size() == (j - 1)){
 						iter->reprojectList.push_back(linkStateID);
 					}
 					else
