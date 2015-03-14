@@ -74,7 +74,7 @@ inline int findMaxContinousLength(std::vector<int>& b, int n, int& maxNum )
 template<typename T>
 static void pyrDownMeanSmooth(const cv::Mat& in, cv::Mat& out)
 {
-	Mat tmp;
+  cv::Mat tmp;
 	tmp.create(cv::Size(in.size().width / 2, in.size().height / 2), in.type());
 
 	for (int y = 0; y < tmp.rows; ++y)
@@ -95,7 +95,7 @@ static void pyrDownMeanSmooth(const cv::Mat& in, cv::Mat& out)
 template<typename T>
 static void pyrDownMedianSmooth(const cv::Mat& in, cv::Mat& out)
 {
-	Mat tmp;
+  cv::Mat tmp;
 	tmp.create(cv::Size(in.size().width / 2, in.size().height / 2), in.type());
 
 	cv::Mat in_smoothed;

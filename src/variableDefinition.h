@@ -64,7 +64,7 @@ const double validPixelPercentageThreshold = 0.5;
 //#define FRAME_TO_FRAME
 const double updateThreshold = 0.0005;
 const int maxIteration = 5 ;
-const int maxPyramidLevel = 2;
+const int maxPyramidLevel = 4;
 
 //For reprojection
 const int expectedClusteringNum = 200;

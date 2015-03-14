@@ -31,7 +31,7 @@
 #include "planeExtraction.h"
 #include "stateEstimation.h"
 #include "variableDefinition.h"
-#include "testDataGeneration.h"
+//#include "testDataGeneration.h"
 
 //For Eigen
 #include "Eigen/Dense"
@@ -45,7 +45,6 @@
 #include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/core/core.hpp"
-#include "opencv2/opencv.hpp"
 #include "opencv2/features2d/features2d.hpp"
 
 //for sensor driver
@@ -74,7 +73,8 @@ image_transport::Subscriber sub_image;
 image_transport::Subscriber sub_depth;
 visualization_msgs::Marker path_line;
 
-Mat rgbImage, depthImage;
+Mat rgbImage;
+Mat depthImage[maxPyramidLevel];
 Mat grayImage[maxPyramidLevel];
 STATE tmpState;
 STATE* lastFrame;
@@ -182,161 +182,10 @@ void pubPath(const Vector3d& p)
     path_line.scale.x = 0.01 ;
     pub_path.publish(path_line);
 }
-/*
-bool fun()
-{
-    ros::Rate loop_rate(0.1) ;
 
-    Mat rgbImage, depthImage;
-    //ofstream fileOutput("result.txt");
-
-    for ( int i = 1; ros::ok() ; i += 1 )
-    {
-        printf("id : %d\n", i);
-
-        cam.retriveFrame( rgbImage, depthImage) ;
-
-        cvtColor(rgbImage, grayImage[0], CV_BGR2GRAY);
-
-#ifdef DOWNSAMPLING
-        pyrDown(grayImage[0], grayImage[0]);//down-sampling
-#endif
-        for (int kk = 1; kk < maxPyramidLevel; kk++){
-            pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
-        }
-
-        sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", grayImage[0]).toImageMsg() ;
-        pub_grayImage.publish( msg ) ;
-
-        sensor_msgs::ImagePtr msg2 = cv_bridge::CvImage(std_msgs::Header(), "mono16", depthImage).toImageMsg() ;
-        pub_depthImage.publish( msg2 ) ;
-
-        depthImage.convertTo(depthImage, CV_32F );
-
-#ifdef DOWNSAMPLING
-        pyrDown(depthImage, depthImage ) ;
-#endif
-
-        if (vst == false )//the first frame
-        {
-            vst = true;
-
-            slidingWindows.insertKeyFrame(grayImage, depthImage, Matrix3d::Identity(), Vector3d::Zero() );
-            slidingWindows.planeDection();
-
-            R_k_c = Matrix3d::Identity();
-            T_k_c = Vector3d::Zero();
-
-            lastFrame = &slidingWindows.states[slidingWindows.tail];
-
-            continue;
-        }
-
-        //double t = (double)cvGetTickCount();
-
-        frameToFrameDenseTracking(R_k_c, T_k_c );
-        //keyframeToFrameDenseTracking(R_k_c, T_k_c );
-
-        //t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
-        //printf("cal time: %f\n", t);
-
-        R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
-        T_c_0 = R_c_0*(
-            R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
-
-        pubOdometry(T_c_0, R_c_0);
-        pubPath(T_c_0);
-
-        cout << "currentPosition:\n" << T_c_0.transpose() << endl;
-
-        if ((i % 10) == 1)
-        {
-            slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
-
-//            cout << "estimate position[before BA]:\n"
-//                << slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
-
-//            double t = (double)cvGetTickCount();
-
-//            slidingWindows.PhotometricBA();
-
-//            t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
-//            printf("BA cal time: %f\n", t);
-
-//            slidingWindows.planeDection();
-
-            R_k_c = Matrix3d::Identity();
-            T_k_c = Vector3d::Zero();
-
-            lastFrame = &slidingWindows.states[slidingWindows.tail];
-
-//            cout << "estimate position[after BA]:\n"
-//                << slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
-
-//            Vector3d groundTruthT;
-//            groundTruthT << groundTruth[timeID].tx, groundTruth[timeID].ty, groundTruth[timeID].tz;
-//            groundTruthT = firstFrameRtoVICON.transpose()*(groundTruthT - firstFrameTtoVICON);
-
-//            cout << "ground truth position:\n"
-//                << groundTruthT.transpose() << endl;
-
-//            fileOutput << slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
-//            fileOutput << groundTruthT.transpose() << endl;
-
-//            Quaterniond q;
-//            Matrix3d truthR;
-//            q.x() = groundTruth[timeID].qx;
-//            q.y() = groundTruth[timeID].qy;
-//            q.z() = groundTruth[timeID].qz;
-//            q.w() = groundTruth[timeID].qw;
-//            truthR = q.toRotationMatrix();
-
-//            double estimateEularAngels[3];
-//            double groundEularAngels[3];
-
-//            RtoEulerAngles(firstFrameRtoVICON*slidingWindows.states[slidingWindows.tail].R_k0, estimateEularAngels);
-//            RtoEulerAngles(truthR, groundEularAngels);
-//            //RtoEulerAngles(slidingWindows.states[slidingWindows.tail].R_k0, estimateEularAngels);
-//            //RtoEulerAngles(firstFrameRtoVICON.transpose()*truthR, groundEularAngels);
-
-//            cout << "estimate angels:\n" << estimateEularAngels[0] << " " << estimateEularAngels[1] << " " << estimateEularAngels[2] << endl;
-//            cout << "ground truth angels:\n" << groundEularAngels[0] << " " << groundEularAngels[1] << " " << groundEularAngels[2] << endl;
-
-//            fileOutput << estimateEularAngels[0] << " " << estimateEularAngels[1] << " " << estimateEularAngels[2]  << endl;
-//            fileOutput << groundEularAngels[0] << " " << groundEularAngels[1] << " " << groundEularAngels[2] << endl;
-
-        }
-        else
-        {
-            lastFrame = &tmpState;
-            tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
-        }
-
-//        ros::Time ros_t = ros::Time::now() ;
-
-//        vector<Vector3d> pointCloud ;
-//        vector<unsigned short>R, G, B ;
-//        vector<Vector3d> ps ;
-//        vector<Matrix3d> Rs ;
-//        slidingWindows.prepareDateForVisualization(pointCloud, R, G, B, ps, Rs );
-//        publish_all(pointCloud, R, G, B, ps, Rs, ros_t, currentR, currentT ) ;
-//        sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", grayImage[0]).toImageMsg() ;
-//        pubImage.publish( msg ) ;
-
-
-
-        //ros::spinOnce() ;
-        //loop_rate.sleep() ;
-        //imshow("image",  grayImage[0]) ;
-        //waitKey(30) ;
-    }
-
-    return true ;
-}
-*/
 void init()
 {
-    //initCalibrationParameters() ;
+    initCalibrationParameters() ;
     //cam.start();
 }
 
@@ -360,13 +209,11 @@ void estimateCurrentState()
         return ;
     }
 
-    //double t = (double)cvGetTickCount();
-
-    frameToFrameDenseTracking(R_k_c, T_k_c );
-    //keyframeToFrameDenseTracking(R_k_c, T_k_c );
-
-    //t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
-    //printf("cal time: %f\n", t);
+#ifdef FRAME_TO_FRAME
+    frameToFrameDenseTracking(R_k_c, T_k_c);
+#else
+    keyframeToFrameDenseTracking(R_k_c, T_k_c );
+#endif
 
     R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
     T_c_0 = R_c_0*(
@@ -386,8 +233,10 @@ void estimateCurrentState()
     }
     else
     {
+#ifdef FRAME_TO_FRAME
         lastFrame = &tmpState;
         tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
+#endif
     }
 }
 
@@ -400,23 +249,26 @@ void rgbImageCallBack(const sensor_msgs::ImageConstPtr& msg)
     cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
     cvtColor(cv_ptr->image, grayImage[0], CV_BGR2GRAY);
 
-#ifdef DOWNSAMPLING
-    pyrDown(grayImage[0], grayImage[0]);//down-sampling
-#endif
-
-    for (int kk = 1; kk < maxPyramidLevel; kk++){
-        pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
-    }
-    if ( depthImage.rows != grayImage[0].rows || depthImage.cols != grayImage[0].cols ){
+    if ( depthImage[0].rows != grayImage[0].rows || depthImage[0].cols != grayImage[0].cols ){
         return ;
     }
 
-    depthImage.convertTo(depthImage, CV_32F );
-    //depthImage /= depthFactor;
+    //grayImage
+#ifdef DOWNSAMPLING
+    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
+#endif
+
+    for (int kk = 1; kk < maxPyramidLevel; kk++){
+        pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
+    }
 
 #ifdef DOWNSAMPLING
-    pyrDown(depthImage, depthImage ) ;
+    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
 #endif
+
+    for (int kk = 1; kk < maxPyramidLevel; kk++){
+        pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
+    }
 
     estimateCurrentState() ;
 }
@@ -427,22 +279,32 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
     cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8);
     grayImage[0] = cv_ptr->image.clone() ;
 
+    if ( depthImage[0].rows != grayImage[0].rows || depthImage[0].cols != grayImage[0].cols ){
+        return ;
+    }
+    depthImage[0] /= 1000;
+
+    //printf("depth = %f\n", depthImage[0].at<float>(240, 320) ) ;
+
+    //grayImage
 #ifdef DOWNSAMPLING
-    pyrDown(grayImage[0], grayImage[0]);//down-sampling
+    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
 #endif
 
     for (int kk = 1; kk < maxPyramidLevel; kk++){
-        pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
-    }
-    if ( depthImage.rows != grayImage[0].rows || depthImage.cols != grayImage[0].cols ){
-        return ;
+        pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
     }
 
-    depthImage.convertTo(depthImage, CV_32F );
+    //depthImage[0].convertTo(depthImage[0], CV_32F );
+
 
 #ifdef DOWNSAMPLING
-    pyrDown(depthImage, depthImage ) ;
+    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
 #endif
+
+    for (int kk = 1; kk < maxPyramidLevel; kk++){
+        pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
+    }
 
     estimateCurrentState() ;
 }
@@ -450,21 +312,23 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
 void depthImageCallBack(const sensor_msgs::ImageConstPtr& msg)
 {
     //cout << "depth: " << msg->header.stamp << endl ;
-    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::TYPE_32FC1 );
-    depthImage = cv_ptr->image.clone() ;
+    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO16 );
+    cv_ptr->image.convertTo(depthImage[0], CV_32F );
+    //depthImage[0] = cv_ptr->image.clone() ;
 }
 
 int main(int argc, char** argv )
 {
-    //init() ;
+    init() ;
     ros::init(argc, argv, "denseVO") ;
     ros::NodeHandle n ;
     //ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug);
     image_transport::ImageTransport it(n) ;
 
-    //sub_image = it.subscribe("camera/grayImage", 1, &grayImageCallBack);
-    sub_image = it.subscribe("/camera/rgb/image_color", 1, &rgbImageCallBack);
-    sub_depth = it.subscribe("/camera/depth/image", 1, &depthImageCallBack);
+    sub_image = it.subscribe("camera/grayImage", 20, &grayImageCallBack);
+    sub_depth = it.subscribe("/camera/depthImage", 20, &depthImageCallBack);
+    //sub_image = it.subscribe("/camera/rgb/image_color", 100, &rgbImageCallBack);
+    //sub_depth = it.subscribe("/camera/depth/image", 100, &depthImageCallBack);
 
     pub_path = n.advertise<visualization_msgs::Marker>("/denseVO/path", 1000);;
     pub_odometry = n.advertise<nav_msgs::Odometry>("/denseVO/odometry", 1000);;
