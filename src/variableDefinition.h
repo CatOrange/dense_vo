@@ -55,15 +55,16 @@ const int maxKMeansNum = 500;
 
 //for huber kernel
 #define WEIGHTEDCOST
-const double huberKernelThreshold = 10.0;
+const double huberKernelThreshold = 8.0;
 const double validPixelThreshold = 0.5;
 const double validPixelPercentageThreshold = 0.5;
 
 //for dense tracking
 //#define DEBUG_DENSETRACKING
+//#define FRAME_TO_FRAME
 const double updateThreshold = 0.0005;
 const int maxIteration = 5 ;
-const int maxPyramidLevel = 4;
+const int maxPyramidLevel = 2;
 
 //For reprojection
 const int expectedClusteringNum = 200;

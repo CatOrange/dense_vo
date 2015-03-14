@@ -17,8 +17,7 @@
 #include "planeExtraction.h"
 #include "stateEstimation.h"
 #include "variableDefinition.h"
-#include "testDataGeneration.h"
-#include "opencv2/opencv.hpp"
+//#include "testDataGeneration.h"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/calib3d/calib3d.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
@@ -369,7 +368,8 @@ void updateR_T(Vector3d& w, Vector3d& v)
 }
 
 //testDataGenerator TDG;
-Mat rgbImage, depthImage;
+Mat rgbImage;
+Mat depthImage[maxPyramidLevel];
 Mat grayImage[maxPyramidLevel];
 STATE tmpState;
 STATE* lastFrame;
@@ -480,11 +480,13 @@ int main()
 		cvtColor(rgbImage, grayImage[0], CV_BGR2GRAY);
 
 #ifdef DOWNSAMPLING
-		pyrDown(grayImage[0], grayImage[0]);//down-sampling
+		pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
+		//pyrDown(grayImage[0], grayImage[0]);//down-sampling
 #endif
 
 		for (int kk = 1; kk < maxPyramidLevel; kk++){
-			pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
+			pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
+			//pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
 		}
 
 		//read depth image
@@ -502,16 +504,22 @@ int main()
 			k = i + 1;
 		}
 		strcat(tmp, depthFileNameList[k]);
-		depthImage = imread(tmp, CV_LOAD_IMAGE_ANYDEPTH | CV_LOAD_IMAGE_ANYCOLOR);
+		depthImage[0] = imread(tmp, CV_LOAD_IMAGE_ANYDEPTH | CV_LOAD_IMAGE_ANYCOLOR);
 
-		depthImage.convertTo(depthImage, CV_32F  );
-		depthImage /= depthFactor;
+		depthImage[0].convertTo(depthImage[0], CV_32F  );
+		depthImage[0] /= depthFactor;
 
 		//cv::undistort(depthImage, depthImage, cameraParameters.cameraMatrix, cameraParameters.distCoeffs);
 
 #ifdef DOWNSAMPLING
-		pyrDown(depthImage, depthImage ) ;
+		pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
+		//pyrDown(depthImage, depthImage ) ;
 #endif
+
+		for (int kk = 1; kk < maxPyramidLevel; kk++){
+			pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
+			//pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
+		}
 
 		//imshow("rgb original", rgbImage);
 		//imshow("gray original", grayImage[0] );
@@ -580,8 +588,11 @@ int main()
 
 		//double t = (double)cvGetTickCount();
 
-		frameToFrameDenseTracking(R_k_c, T_k_c );
-		//keyframeToFrameDenseTracking(R_k_c, T_k_c );
+#ifdef FRAME_TO_FRAME
+		frameToFrameDenseTracking(R_k_c, T_k_c);
+#else
+		keyframeToFrameDenseTracking(R_k_c, T_k_c );
+#endif
 
 		//t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
 		//printf("cal time: %f\n", t);
@@ -615,12 +626,12 @@ int main()
 
 			double t = (double)cvGetTickCount();
 
-			slidingWindows.PhotometricBA();
+			//slidingWindows.PhotometricBA();
 
 			t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
 			printf("BA cal time: %f\n", t);
 
-			slidingWindows.planeDection();
+			//slidingWindows.planeDection();
 
 			R_k_c = Matrix3d::Identity();
 			T_k_c = Vector3d::Zero();
@@ -670,8 +681,10 @@ int main()
 		}
 		else
 		{
+#ifdef FRAME_TO_FRAME
 			lastFrame = &tmpState;
 			tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
+#endif
 		}
 		//imshow("currentImage", grayImage[0]);
 		//char c = waitKey(0);

@@ -200,7 +200,7 @@ public:
 		}
 	}
 
-	void insertFrame(const Mat grayImage[3], const Mat& depthImage, const Matrix3d& R, const Vector3d& T, CAMER_PARAMETERS* para )
+	void insertFrame(const Mat grayImage[maxPyramidLevel], const Mat depthImage[maxPyramidLevel], const Matrix3d& R, const Vector3d& T, CAMER_PARAMETERS* para )
 	{
 		STATE *current = this;
 		Mat currentDepthImage;
@@ -210,14 +210,8 @@ public:
 		int m = IMAGE_WIDTH;
 		for (int i = 0; i < maxPyramidLevel; i++)
 		{
-			if (i == 0){
-				currentDepthImage = depthImage.clone();
-			}
-			if (i > 0){
-				pyrDown(currentDepthImage, currentDepthImage);
-			}
 			memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
-			memcpy(current->depthImage[i], (float*)currentDepthImage.data, n*m*sizeof(float));
+			memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
 			n >>= 1;
 			m >>= 1;
 		}
@@ -830,7 +824,7 @@ public:
 		}
 	}
 
-	void insertKeyFrame( const Mat grayImage[3], const Mat& depthImage, const Matrix3d& R, const Vector3d& T )
+	void insertKeyFrame(const Mat grayImage[maxPyramidLevel], const Mat depthImage[maxPyramidLevel], const Matrix3d& R, const Vector3d& T)
 	{
 		if (numOfState == slidingWindowSize){
 			//puts("pop state");
@@ -849,14 +843,8 @@ public:
 		int m = width;
 		for (int i = 0; i < maxPyramidLevel; i++)
 		{
-			if (i == 0){
-				currentDepthImage = depthImage.clone();
-			}
-			if (i > 0){
-				pyrDown(currentDepthImage, currentDepthImage);
-			}
 			memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
-			memcpy(current->depthImage[i], (float*)currentDepthImage.data, n*m*sizeof(float));
+			memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
 			n >>= 1;
 			m >>= 1;
 		}
@@ -1014,7 +1002,7 @@ public:
 		T = newT;
 	}
 
-	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[3], Matrix3d& R, Vector3d& T)
+	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
 	{
 		Matrix3d tmpR = R;
 		Vector3d tmpT = T;

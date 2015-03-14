@@ -205,7 +205,7 @@ struct CAMER_PARAMETERS
 		{
 			fx[i] = fx[i - 1] / 2.0;
 			fy[i] = fy[i - 1] / 2.0;
-			cx[i] = ( cx[i-1] + 0.5 ) / 2.0 - 0.5;
+			cx[i] = ( cx[i - 1] + 0.5 ) / 2.0 - 0.5;
 			cy[i] = ( cy[i - 1] + 0.5 ) / 2.0 - 0.5;
 		}
 	}

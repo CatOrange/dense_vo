@@ -4,6 +4,8 @@
 #include "variableDefinition.h"
 #include <vector>
 #include <algorithm>
+#include "opencv2/core/core.hpp"
+#include "opencv2/opencv.hpp"
 
 const int dx[4] = { 0, 0, -1, 1 };//up down left right
 const int dy[4] = { -1, 1, 0, 0 };//up down left right
@@ -67,6 +69,46 @@ inline int findMaxContinousLength(std::vector<int>& b, int n, int& maxNum )
 		}
 	}
 	return maxValue;
+}
+
+template<typename T>
+static void pyrDownMeanSmooth(const cv::Mat& in, cv::Mat& out)
+{
+	Mat tmp;
+	tmp.create(cv::Size(in.size().width / 2, in.size().height / 2), in.type());
+
+	for (int y = 0; y < tmp.rows; ++y)
+	{
+		for (int x = 0; x < tmp.cols; ++x)
+		{
+			int x0 = x << 1 ;
+			int x1 = x0 + 1;
+			int y0 = y << 1 ;
+			int y1 = y0 + 1;
+
+			tmp.at<T>(y, x) = (T)((in.at<T>(y0, x0) + in.at<T>(y0, x1) + in.at<T>(y1, x0) + in.at<T>(y1, x1)) / 4.0f);
+		}
+	}
+	out = tmp.clone();
+}
+
+template<typename T>
+static void pyrDownMedianSmooth(const cv::Mat& in, cv::Mat& out)
+{
+	Mat tmp;
+	tmp.create(cv::Size(in.size().width / 2, in.size().height / 2), in.type());
+
+	cv::Mat in_smoothed;
+	cv::medianBlur(in, in_smoothed, 3);
+
+	for (int y = 0; y < tmp.rows; ++y)
+	{
+		for (int x = 0; x < tmp.cols; ++x)
+		{
+			tmp.at<T>(y, x) = in_smoothed.at<T>(y << 1, x << 1 );
+		}
+	}
+	out = tmp.clone();
 }
 
 #endif
