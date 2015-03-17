@@ -219,12 +219,15 @@ void estimateCurrentState()
     T_c_0 = R_c_0*(
                 R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
 
+    pubOdometry(T_c_0, R_c_0);
+    pubPath(T_c_0);
+
     if ((cnt % 10) == 1)
     {
         slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
 
-        pubOdometry(T_c_0, R_c_0);
-        pubPath(T_c_0);
+        //pubOdometry(T_c_0, R_c_0);
+        //pubPath(T_c_0);
         cout << cnt/10 << "-" << "currentPosition:\n" << T_c_0.transpose() << endl;
 
         R_k_c = Matrix3d::Identity();
