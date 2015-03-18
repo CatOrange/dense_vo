@@ -64,7 +64,7 @@ const double validPixelPercentageThreshold = 0.5;
 //#define FRAME_TO_FRAME
 const double updateThreshold = 0.0005;
 const int maxIteration = 20 ;
-const int maxPyramidLevel = 3;
+const int maxPyramidLevel = 4;
 const int minDenseTrackingNum = 100;
 const double covRotationVel = 1.0 / 180.0 * PI ;
 const double weightRotationVel = 1.0 / covRotationVel ;

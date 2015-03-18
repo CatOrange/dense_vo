@@ -257,17 +257,17 @@ void rgbImageCallBack(const sensor_msgs::ImageConstPtr& msg)
     }
 
     //grayImage
-#ifdef DOWNSAMPLING
-    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
-#endif
+//#ifdef DOWNSAMPLING
+//    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
+//#endif
 
     for (int kk = 1; kk < maxPyramidLevel; kk++){
         pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
     }
 
-#ifdef DOWNSAMPLING
-    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
-#endif
+//#ifdef DOWNSAMPLING
+//    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
+//#endif
 
     for (int kk = 1; kk < maxPyramidLevel; kk++){
         pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
@@ -290,9 +290,9 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
     //printf("depth = %f\n", depthImage[0].at<float>(240, 320) ) ;
 
     //grayImage
-#ifdef DOWNSAMPLING
-    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
-#endif
+//#ifdef DOWNSAMPLING
+//    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
+//#endif
 
     for (int kk = 1; kk < maxPyramidLevel; kk++){
         pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
@@ -301,9 +301,9 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
     //depthImage[0].convertTo(depthImage[0], CV_32F );
 
 
-#ifdef DOWNSAMPLING
-    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
-#endif
+//#ifdef DOWNSAMPLING
+//    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
+//#endif
 
     for (int kk = 1; kk < maxPyramidLevel; kk++){
         pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
