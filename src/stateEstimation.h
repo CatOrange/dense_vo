@@ -1015,7 +1015,7 @@ public:
 		T = newT;
 	}
 
-	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
+	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T, Mat& residualImage )
 	{
 		//no assumption on angular and linear velocity
 		Matrix3d tmpR = R;
@@ -1105,6 +1105,7 @@ public:
 					{
 						int k = INDEX(u, v, n, m);
 						if ( currentPixelInfo.valid[k] == false ) {
+							residualImage.at<uchar>(u, v) = 0;
 							continue;
 						}
 
@@ -1112,13 +1113,13 @@ public:
 						int u2 = int( p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5 ) ;
 						int v2 = int( p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5 ) ;
 
-						//double reprojectIntensity;
-						//if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
-						//	continue;
-						//}
-						if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
+						double reprojectIntensity;
+						if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
 							continue;
 						}
+						//if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
+						//	continue;
+						//}
 
 #ifdef DEBUG_DENSETRACKING
 						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
@@ -1126,17 +1127,17 @@ public:
 						next.at<cv::Vec3b>(u2, v2)[2] = proportion*next.at<cv::Vec3b>(u2, v2)[2] + (1 - proportion) * B[pointsLabel[i]];
 #endif
 						double w = 1.0;
-						double r = pIntensity[k] - nextIntensity[INDEX(u2, v2, n, m)];
-						//double r = pIntensity[k] - reprojectIntensity ;
-						double r_fabs = fabs(r);
-
-						currentError += r*r ;
+						//double r = pIntensity[k] - nextIntensity[INDEX(u2, v2, n, m)];
+						double r = pIntensity[k] - reprojectIntensity ;
+						double r_fabs = fabs(r);			
 
 #ifdef WEIGHTEDCOST
 						if (r_fabs > huberKernelThreshold){
 							w = huberKernelThreshold / (r_fabs);
 						}
 #endif
+						residualImage.at<uchar>(u, v) = (uchar)r_fabs;
+						currentError += w*r;
 
 //#pragma omp critical (actualNum)
 						{

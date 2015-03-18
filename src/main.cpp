@@ -371,6 +371,7 @@ void updateR_T(Vector3d& w, Vector3d& v)
 Mat rgbImage;
 Mat depthImage[maxPyramidLevel];
 Mat grayImage[maxPyramidLevel];
+Mat residualImage(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8U);
 STATE tmpState;
 STATE* lastFrame;
 
@@ -378,7 +379,7 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
 	Matrix3d nextR = Matrix3d::Identity();
 	Vector3d nextT = Vector3d::Zero();
-	slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT);
+	slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT, residualImage);
 
 	T_k_c = nextR * T_k_c + nextT;
 	R_k_c = nextR * R_k_c;
@@ -391,7 +392,7 @@ void keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
 	Matrix3d tmpR = R_k_c;
 	Vector3d tmpT = T_k_c;
 
-	slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
+	slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c, residualImage);
 
 	slidingWindows.last_delta_R = R_k_c * tmpR.transpose();
 	slidingWindows.last_delta_T = T_k_c - slidingWindows.last_delta_R* tmpT;
@@ -481,6 +482,7 @@ int main()
 		rgbImage = imread(tmp, CV_LOAD_IMAGE_COLOR);
 		
 		Mat rgbRectImage;
+
 		//cv::undistort(rgbImage, rgbRectImage, cameraParameters.cameraMatrix, cameraParameters.distCoeffs);
 
 		//imshow("rgbImge", rgbImage ) ;
@@ -698,9 +700,13 @@ int main()
 			tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
 #endif
 		}
-		//imshow("currentImage", grayImage[0]);
-		//char c = waitKey(0);
-		//printf("%c\n", c);
+		if (i >= 580)
+		{
+			imshow("currentImage", residualImage );
+			imshow("grayImage", grayImage[0]);
+			char c = waitKey(0);
+			//printf("%c\n", c);
+		}
 	}
 	fileOutput.close();
 
