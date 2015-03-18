@@ -43,7 +43,7 @@ const double graidientThreshold = 2.0;
 const double invIntensityCov = 1.0 / (3.0*3.0);
 const double dxOptProportion = 0.1;
 const int maxIterationBA = 3;
-const int maxPyramidLevelBA = 2;
+const int maxPyramidLevelBA = 1;
 const double normalizedParallaxThreshold = 10.0 / 535.0;
 const double angularThreshold = 3.0 / 180 * PI;
 
@@ -63,15 +63,22 @@ const double validPixelPercentageThreshold = 0.5;
 //#define DEBUG_DENSETRACKING
 //#define FRAME_TO_FRAME
 const double updateThreshold = 0.0005;
-const int maxIteration = 5 ;
-const int maxPyramidLevel = 4;
+const int maxIteration = 20 ;
+const int maxPyramidLevel = 3;
+const int minDenseTrackingNum = 100;
+const double covRotationVel = 1.0 / 180.0 * PI ;
+const double weightRotationVel = 1.0 / covRotationVel ;
+const double covLinearVel = 0.02 ;
+const double weightLinearVel = 1.0 / covLinearVel ;
 
 //For reprojection
 const int expectedClusteringNum = 200;
 const int minOptNum = 100 * (1 << (maxPyramidLevelBA - 1) * 2);
 //const int minOptNum = T_NUM;
 
-//for plane extraction - AHC
+/*
+for plane extraction - AHC
+*/
 //#define DEBUG_CLUSTRING
 const int winH = 4;
 const int winW = 4;
@@ -83,4 +90,8 @@ const int T_NUM = 20000 ;
 const int minimumPixelsInASuperpixel = minOptNum;
 const int DISPLAY_NUM = 50;
 
+/*
+for openmp
+*/
+const int ompNumThreads = 2;
 #endif

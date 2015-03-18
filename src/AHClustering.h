@@ -93,7 +93,7 @@ public:
 		//Cp[2][2] = tmp.sumZ2 / (tmp.num) - tmp.sumZ*tmp.sumZ / (tmp.num*tmp.num);
 
 		//modified
-#pragma omp parallel
+//#pragma omp parallel
 		{
 			//Cp[0][0] = tmp.sumX2 - 2.0*tmp.sumX*tmp.sumX / tmp.num + tmp.sumX*tmp.sumX / tmp.num;
 			//Cp[0][1] = tmp.sumXY - 2.0*tmp.sumX*tmp.sumY / tmp.num + tmp.sumX*tmp.sumY / tmp.num;
@@ -123,7 +123,7 @@ public:
 		{
 			int minIndex = 0;
 
-#pragma omp parallel for
+//#pragma omp parallel for
 			for (int i = 0; i < 3; i++)
 			{
 				if (w[i] < 0){

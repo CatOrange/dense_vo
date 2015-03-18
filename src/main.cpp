@@ -14,7 +14,7 @@
 #include "Eigen/SparseCore"
 #include "Eigen/SparseCholesky"
 #include "kMeansClustering.h"
-#include "planeExtraction.h"
+//#include "planeExtraction.h"
 #include "stateEstimation.h"
 #include "variableDefinition.h"
 //#include "testDataGeneration.h"
@@ -387,7 +387,17 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 void keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
 {
 	STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
+
+	Matrix3d tmpR = R_k_c;
+	Vector3d tmpT = T_k_c;
+
 	slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
+
+	slidingWindows.last_delta_R = R_k_c * tmpR.transpose();
+	slidingWindows.last_delta_T = T_k_c - slidingWindows.last_delta_R* tmpT;
+
+	//cout << slidingWindows.last_delta_R << endl;
+	//cout << slidingWindows.last_delta_T.transpose() << endl;
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -574,9 +584,9 @@ int main()
 			firstFrameTtoVICON << groundTruth[timeID].tx, groundTruth[timeID].ty, groundTruth[timeID].tz;
 
 			//cout << firstFrameTtoVICON << endl;
-
 			slidingWindows.insertKeyFrame(grayImage, depthImage, Matrix3d::Identity(), Vector3d::Zero() );
-			slidingWindows.planeDection();
+
+			//slidingWindows.planeDection();
 
 			R_k_c = Matrix3d::Identity();
 			T_k_c = Vector3d::Zero();
@@ -585,6 +595,8 @@ int main()
 
 			continue;
 		}
+
+		
 
 		//double t = (double)cvGetTickCount();
 

@@ -238,6 +238,7 @@ public:
 			current->pixelInfo[level].AijTAij.resize(n*m);
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 
+			omp_set_num_threads(ompNumThreads);
 #pragma omp parallel for 
 			for (int u = 0; u < n; u++)
 			{
@@ -262,7 +263,6 @@ public:
 
 					MatrixXd oneBytwo(1, 2);
 					MatrixXd twoBySix(2, 6);
-					MatrixXd oneBySix(1, 6);
 
 					oneBytwo(0, 0) = pGradientX[k];
 					oneBytwo(0, 1) = pGradientY[k];
@@ -353,6 +353,7 @@ public:
 			unsigned char* pIntensity = intensity[id];
 
 			//calculate gradient map
+			omp_set_num_threads(ompNumThreads);
 #pragma omp parallel for 
 			for (int i = height - 2; i > 0; i--)
 			{
@@ -374,6 +375,7 @@ public:
 				}
 			}
 
+			omp_set_num_threads(ompNumThreads);
 #pragma omp parallel for 
 			for (int i = height - 2; i > 0; i--)
 			{
@@ -391,6 +393,7 @@ public:
 				pGradientY[INDEX(i, width, height, width)] = pGradientY[INDEX(i, width - 2, height, width)];
 			}
 
+			omp_set_num_threads(ompNumThreads);
 #pragma omp parallel for 
 			for (int j = width - 1; j >= 0; j--)
 			{
@@ -417,6 +420,7 @@ public:
 class STATEESTIMATION
 {
 public:
+	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 	//camera parameters
 	int height, width;
 	CAMER_PARAMETERS* para;
@@ -439,6 +443,11 @@ public:
 	int maskSuperpixelID[IMAGE_HEIGHT][IMAGE_WIDTH];
 	double maskDistance[IMAGE_HEIGHT][IMAGE_WIDTH];
 
+	//for dense tracking
+	Vector3d last_delta_v, last_delta_w;
+	Matrix3d last_delta_R;
+	Vector3d last_delta_T;
+
 	STATEESTIMATION(int hh, int ww, CAMER_PARAMETERS* p)
 	{
 		height = hh;
@@ -453,6 +462,10 @@ public:
 		memset(mask, true, sizeof(mask)); 
 
 		superpixelList.clear();
+		last_delta_v.setZero();
+		last_delta_w.setZero();
+		last_delta_R.setIdentity();
+		last_delta_T.setZero();
 	}
 
 	~STATEESTIMATION(){
@@ -871,6 +884,7 @@ public:
 			current->pixelInfo[level].AijTAij.resize(n*m);
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 
+			omp_set_num_threads(ompNumThreads);
 #pragma omp parallel for 
 			for (int u = 0; u < n; u++)
 			{
@@ -897,8 +911,7 @@ public:
 					//MatrixXd twoByThree(2, 3);
 					//MatrixXd threeBySix(3, 6);
 					MatrixXd twoBySix(2, 6);
-					MatrixXd oneBySix(1, 6);
-
+	
 					oneBytwo(0, 0) = pGradientX[k];
 					oneBytwo(0, 1) = pGradientY[k];
 
@@ -970,7 +983,7 @@ public:
 		return maxValue;
 	}
 
-	Matrix3d vectorToSkewMatrix(Vector3d& w)
+	Matrix3d vectorToSkewMatrix(const Vector3d& w)
 	{
 		Matrix3d skewW(3, 3);
 		skewW(0, 0) = skewW(1, 1) = skewW(2, 2) = 0;
@@ -984,7 +997,7 @@ public:
 		return skewW;
 	}
 
-	void updateR_T(Matrix3d& R, Vector3d& T, Vector3d& v, Vector3d& w)
+	void updateR_T(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w)
 	{
 		Matrix3d skewW = vectorToSkewMatrix(w) ;
 
@@ -1004,8 +1017,13 @@ public:
 
 	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
 	{
+		//no assumption on angular and linear velocity
 		Matrix3d tmpR = R;
 		Vector3d tmpT = T;
+
+		//linear assumption on angular and linear velocity
+		//Matrix3d tmpR = last_delta_R * R ;
+		//Vector3d tmpT = last_delta_R * T + last_delta_T;
 
 		for (int level = maxPyramidLevel - 1; level >= 0; level--)
 		{
@@ -1017,6 +1035,9 @@ public:
 			unsigned char* pIntensity = current->intensity[level];
 			unsigned char *nextIntensity = (unsigned char*)grayImage[level].data;
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
+			double lastError = 100000000000.0;
+			last_delta_v.Zero();
+			last_delta_w.Zero();
 
 //#ifdef DEBUG_DENSETRACKING
 //			double proportion = 0.3;
@@ -1063,6 +1084,7 @@ public:
 //			//vector<MatrixXd> AijTAij(n*m);
 //			//vector<Vector3d> pi(n*m);
 //
+			
 			for (int ith = 0; ith < maxIteration; ith++)
 			{
 #ifdef DEBUG_DENSETRACKING
@@ -1071,6 +1093,7 @@ public:
 				cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
 #endif
 				double currentError = 0;
+				
 				int actualNum = 0;
 				MatrixXd ATA = MatrixXd::Zero(6, 6);
 				VectorXd ATb = VectorXd::Zero(6);
@@ -1107,6 +1130,8 @@ public:
 						//double r = pIntensity[k] - reprojectIntensity ;
 						double r_fabs = fabs(r);
 
+						currentError += r*r ;
+
 #ifdef WEIGHTEDCOST
 						if (r_fabs > huberKernelThreshold){
 							w = huberKernelThreshold / (r_fabs);
@@ -1129,6 +1154,7 @@ public:
 						{
 							ATb -= w*r*currentPixelInfo.Aij[k];
 						}
+
 					}
 				}
 
@@ -1141,6 +1167,20 @@ public:
 				if (actualNum < 6){
 					puts("Dense Tracking: lack of rank!break!");
 					break;
+				}
+
+				if (actualNum < minDenseTrackingNum ){
+					puts("Dense Tracking: gradients are not rich!");
+					break;
+				}
+
+				if (currentError > lastError){
+					//revert
+					updateR_T(tmpR, tmpT, -last_delta_v, -last_delta_w );
+					break;
+				}
+				else{
+					lastError = currentError;
 				}
 
 				LLT<MatrixXd> lltOfA = ATA.llt();
@@ -1164,6 +1204,9 @@ public:
 					w(1) = -x(4);
 					w(2) = -x(5);
 					updateR_T(tmpR, tmpT, v, w);
+					last_delta_v = v;
+					last_delta_w = w;
+
 					//printf("ith=%d norm=%f error=%f\n", ith, maxAbsValueOfVector(x), currentError );
 #ifdef DEBUG_DENSETRACKING
 					printf("ith=%d num=%d norm=%f error=%f\n", ith, actualNum, x.norm(), currentError);
@@ -1645,6 +1688,8 @@ public:
 #endif
 
 						int reProjectListSz = iter->reprojectList.size() ;
+
+						omp_set_num_threads(ompNumThreads);
 #pragma omp parallel for
 						for (int j = 0; j < reProjectListSz; j++)
 						{
