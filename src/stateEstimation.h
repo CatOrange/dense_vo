@@ -23,7 +23,6 @@
 #include "opencv2/opencv.hpp"
 #include "opencv2/features2d/features2d.hpp"
 #include "sophus/se3.hpp"
-#include "sophus/so3.hpp"
 using namespace std;
 using namespace cv;
 using namespace Eigen;
@@ -1161,15 +1160,9 @@ public:
 #endif
 						residualImage.at<uchar>(u, v) = (uchar)r_fabs;
 
-						currentError += w*r_fabs;
-
 //#pragma omp critical (actualNum)
 						{
 							actualNum++;
-						}
-//#pragma omp critical (currentError)
-						{
-							currentError += r*r;
 						}
 //#pragma omp critical (ATA)
 						{

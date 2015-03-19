@@ -65,12 +65,12 @@ const double validPixelPercentageThreshold = 0.5;
 //#define ADD_VELOCITY_PRIOR
 const double updateThreshold = 0.0005;
 const int maxIteration = 20 ;
-const int maxPyramidLevel = 4;
+const int maxPyramidLevel = 2;
 const int minDenseTrackingNum = 100;
 const double covRotationVel = 1.0 / 180.0 * PI ;
-const double weightRotationVel = 1.0 / covRotationVel ;
+const double weightRotationVel = 1.0 / covRotationVel*10 ;
 const double covLinearVel = 0.01 ;
-const double weightLinearVel = 1.0 / covLinearVel ;
+const double weightLinearVel = 1.0 / covLinearVel*10 ;
 
 //For reprojection
 const int expectedClusteringNum = 200;

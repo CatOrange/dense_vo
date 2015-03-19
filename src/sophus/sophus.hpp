@@ -25,8 +25,8 @@
 
 #include <stdexcept>
 
-#include <Eigen/Eigen>
-#include <Eigen/Geometry>
+#include "../Eigen/Eigen"
+#include "../Eigen/Geometry"
 
 namespace Sophus {
 using namespace Eigen;

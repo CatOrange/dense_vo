@@ -223,11 +223,11 @@ void estimateCurrentState()
     pubOdometry(T_c_0, R_c_0);
     pubPath(T_c_0);
 
-    cv::Mat falseColorsMap;
-    applyColorMap(residualImage, falseColorsMap, cv::COLORMAP_RAINBOW );
+    //cv::Mat falseColorsMap;
+    //applyColorMap(residualImage, falseColorsMap, cv::COLORMAP_RAINBOW );
 
-    cv::imshow("Resid", falseColorsMap);
-    cv::waitKey(10) ;
+    //cv::imshow("Resid", falseColorsMap);
+    //cv::waitKey(10) ;
 
     if ((cnt % 10) == 1)
     {
