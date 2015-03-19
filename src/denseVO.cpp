@@ -76,6 +76,7 @@ visualization_msgs::Marker path_line;
 Mat rgbImage;
 Mat depthImage[maxPyramidLevel];
 Mat grayImage[maxPyramidLevel];
+Mat residualImage(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8U);
 STATE tmpState;
 STATE* lastFrame;
 
@@ -104,7 +105,7 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
     Matrix3d nextR = Matrix3d::Identity();
     Vector3d nextT = Vector3d::Zero();
-    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT);
+    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT, residualImage);
 
     T_k_c = nextR * T_k_c + nextT;
     R_k_c = nextR * R_k_c;
@@ -113,7 +114,7 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 void keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
 {
     STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
+    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c, residualImage);
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -222,6 +223,12 @@ void estimateCurrentState()
     pubOdometry(T_c_0, R_c_0);
     pubPath(T_c_0);
 
+    cv::Mat falseColorsMap;
+    applyColorMap(residualImage, falseColorsMap, cv::COLORMAP_RAINBOW );
+
+    cv::imshow("Resid", falseColorsMap);
+    cv::waitKey(10) ;
+
     if ((cnt % 10) == 1)
     {
         slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
@@ -286,6 +293,9 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
         return ;
     }
     depthImage[0] /= 1000;
+
+//    printf("%d %d %d %d %d\n", grayImage[0].at<uchar>(160, 120), grayImage[0].at<uchar>(10, 10),
+//            grayImage[0].at<uchar>(310, 230), grayImage[0].at<uchar>(0, 230), grayImage[0].at<uchar>(310, 10) ) ;
 
     //printf("depth = %f\n", depthImage[0].at<float>(240, 320) ) ;
 

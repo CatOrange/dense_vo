@@ -1134,10 +1134,10 @@ public:
 #ifdef WEIGHTEDCOST
 						if (r_fabs > huberKernelThreshold){
 							w = huberKernelThreshold / (r_fabs);
+              currentError += r_fabs ;
 						}
 #endif
 						residualImage.at<uchar>(u, v) = (uchar)r_fabs;
-						currentError += w*r;
 
 //#pragma omp critical (actualNum)
 						{

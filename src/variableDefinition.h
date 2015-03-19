@@ -55,7 +55,7 @@ const int maxKMeansNum = 500;
 
 //for huber kernel
 #define WEIGHTEDCOST
-const double huberKernelThreshold = 8.0;
+const double huberKernelThreshold = 30.0;
 const double validPixelThreshold = 0.5;
 const double validPixelPercentageThreshold = 0.5;
 
