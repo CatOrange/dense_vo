@@ -55,20 +55,21 @@ const int maxKMeansNum = 500;
 
 //for huber kernel
 #define WEIGHTEDCOST
-const double huberKernelThreshold = 8.0;
+const double huberKernelThreshold = 16.0;
 const double validPixelThreshold = 0.5;
 const double validPixelPercentageThreshold = 0.5;
 
 //for dense tracking
 //#define DEBUG_DENSETRACKING
 //#define FRAME_TO_FRAME
+//#define ADD_VELOCITY_PRIOR
 const double updateThreshold = 0.0005;
 const int maxIteration = 20 ;
-const int maxPyramidLevel = 3;
+const int maxPyramidLevel = 4;
 const int minDenseTrackingNum = 100;
 const double covRotationVel = 1.0 / 180.0 * PI ;
 const double weightRotationVel = 1.0 / covRotationVel ;
-const double covLinearVel = 0.02 ;
+const double covLinearVel = 0.01 ;
 const double weightLinearVel = 1.0 / covLinearVel ;
 
 //For reprojection
@@ -93,5 +94,5 @@ const int DISPLAY_NUM = 50;
 /*
 for openmp
 */
-const int ompNumThreads = 2;
+const int ompNumThreads = 4;
 #endif

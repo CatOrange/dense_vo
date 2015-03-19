@@ -22,6 +22,8 @@
 #include "opencv2/core/core.hpp"
 #include "opencv2/opencv.hpp"
 #include "opencv2/features2d/features2d.hpp"
+#include "sophus/se3.hpp"
+#include "sophus/so3.hpp"
 using namespace std;
 using namespace cv;
 using namespace Eigen;
@@ -217,7 +219,7 @@ public:
 		}
 
 		//init the graident map
-		current->computeGradientMap();
+		current->computeGradientMap( grayImage ) ;
 
 		//init the pixel info in a frame
 		for (int level = maxPyramidLevel - 1; level >= 0; level--)
@@ -338,7 +340,7 @@ public:
 		current->T_k0 = T;
 	}
 
-	void computeGradientMap()
+	void computeGradientMap( const Mat grayImage[maxPyramidLevel] )
 	{
 		int height = IMAGE_HEIGHT;
 		int width = IMAGE_WIDTH;
@@ -352,6 +354,15 @@ public:
 			double* pGradientY = gradientY[id];
 			unsigned char* pIntensity = intensity[id];
 
+			//Mat gradientXMap;
+			//Mat gradientYMap;
+
+			//Sobel(grayImage[id], gradientXMap, CV_64F, 1, 0 );
+			//Sobel(grayImage[id], gradientYMap, CV_64F, 0, 1 );
+
+			//memcpy(pGradientX, gradientXMap.data, height*width*sizeof(double));
+			//memcpy(pGradientY, gradientYMap.data, height*width*sizeof(double));
+
 			//calculate gradient map
 			omp_set_num_threads(ompNumThreads);
 #pragma omp parallel for 
@@ -362,15 +373,21 @@ public:
 					if (pDepth[INDEX(i, j, height, width)] > zeroThreshold){
 						totalNumOfValidPixels[id]++;
 					}
-					pGradientX[INDEX(i, j, height, width)] = 0.125*(
-						(int)pIntensity[INDEX(i - 1, j + 1, height, width)] - (int)pIntensity[INDEX(i - 1, j - 1, height, width)] +
-						((int)pIntensity[INDEX(i, j + 1, height, width)] << 1) - ((int)pIntensity[INDEX(i, j - 1, height, width)] << 1) +
-						(int)pIntensity[INDEX(i + 1, j + 1, height, width)] - (int)pIntensity[INDEX(i + 1, j - 1, height, width)]
+					//pGradientX[INDEX(i, j, height, width)] = 0.125*(
+					//	(int)pIntensity[INDEX(i - 1, j + 1, height, width)] - (int)pIntensity[INDEX(i - 1, j - 1, height, width)] +
+					//	((int)pIntensity[INDEX(i, j + 1, height, width)] << 1) - ((int)pIntensity[INDEX(i, j - 1, height, width)] << 1) +
+					//	(int)pIntensity[INDEX(i + 1, j + 1, height, width)] - (int)pIntensity[INDEX(i + 1, j - 1, height, width)]
+					//	);
+					//pGradientY[INDEX(i, j, height, width)] = 0.125*(
+					//	(int)pIntensity[INDEX(i + 1, j - 1, height, width)] - (int)pIntensity[INDEX(i - 1, j - 1, height, width)] +
+					//	((int)pIntensity[INDEX(i + 1, j, height, width)] << 1) - ((int)pIntensity[INDEX(i - 1, j, height, width)] << 1) +
+					//	(int)pIntensity[INDEX(i + 1, j + 1, height, width)] - (int)pIntensity[INDEX(i - 1, j + 1, height, width)]
+					//	);
+					pGradientX[INDEX(i, j, height, width)] = 0.5*(
+						(double)pIntensity[INDEX(i, j + 1, height, width)] - (double)pIntensity[INDEX(i, j - 1, height, width)]
 						);
-					pGradientY[INDEX(i, j, height, width)] = 0.125*(
-						(int)pIntensity[INDEX(i + 1, j - 1, height, width)] - (int)pIntensity[INDEX(i - 1, j - 1, height, width)] +
-						((int)pIntensity[INDEX(i + 1, j, height, width)] << 1) - ((int)pIntensity[INDEX(i - 1, j, height, width)] << 1) +
-						(int)pIntensity[INDEX(i + 1, j + 1, height, width)] - (int)pIntensity[INDEX(i - 1, j + 1, height, width)]
+					pGradientY[INDEX(i, j, height, width)] = 0.5*(
+						(double)pIntensity[INDEX(i + 1, j, height, width)] - (double)pIntensity[INDEX(i - 1, j, height, width)]
 						);
 				}
 			}
@@ -409,8 +426,8 @@ public:
 				pGradientY[INDEX(0, j, height, width)] = pGradientY[INDEX(1, j, height, width)];
 				pGradientX[INDEX(height - 1, j, height, width)] = pGradientX[INDEX(height - 2, j, height, width)];
 				pGradientY[INDEX(height - 1, j, height, width)] = pGradientY[INDEX(height - 2, j, height, width)];
-
 			}
+
 			height >>= 1;
 			width >>= 1;
 		}
@@ -863,7 +880,7 @@ public:
 		}
 
 		//init the graident map
-		current->computeGradientMap();
+		current->computeGradientMap( grayImage );
 
 		//init the pixel info in a frame
 		for (int level = maxPyramidLevel - 1; level >= 0; level--)
@@ -922,6 +939,15 @@ public:
 					//twoByThree(1, 1) = para->fy[level] / Z;
 					//twoByThree(1, 2) = -Y * para->fy[level] / SQ(Z);
 
+					//threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
+					//threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
+					//threeBySix(0, 4) = Z;
+					//threeBySix(1, 3) = -Z;
+					//threeBySix(0, 5) = -Y;
+					//threeBySix(2, 3) = Y;
+					//threeBySix(1, 5) = X;
+					//threeBySix(2, 4) = -X;
+
 					twoBySix(0, 0) = para->fx[level] / Z;
 					twoBySix(0, 1) = 0;
 					twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
@@ -935,15 +961,6 @@ public:
 					twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y ;
 					twoBySix(1, 4) = -twoBySix(1, 2)* X;
 					twoBySix(1, 5) = twoBySix(1, 1)* X;
-
-					//threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
-					//threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
-					//threeBySix(0, 4) = Z;
-					//threeBySix(1, 3) = -Z;
-					//threeBySix(0, 5) = -Y;
-					//threeBySix(2, 3) = Y;
-					//threeBySix(1, 5) = X;
-					//threeBySix(2, 4) = -X;
 
 					//currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
 					currentPixelInfo.Aij[k] = (oneBytwo*twoBySix).transpose();
@@ -997,7 +1014,7 @@ public:
 		return skewW;
 	}
 
-	void updateR_T(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w)
+	void updateR_T(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w, Matrix3d& incR, Vector3d& incT )
 	{
 		Matrix3d skewW = vectorToSkewMatrix(w) ;
 
@@ -1010,6 +1027,9 @@ public:
 
 		Matrix3d newR = R*deltaR;
 		Vector3d newT = R*deltaT + T;
+
+		incT = incR*deltaT + incT;
+		incR = incR*deltaR;
 
 		R = newR;
 		T = newT;
@@ -1025,6 +1045,8 @@ public:
 		//Matrix3d tmpR = last_delta_R * R ;
 		//Vector3d tmpT = last_delta_R * T + last_delta_T;
 
+		Matrix3d incR = Matrix3d::Identity();
+		Vector3d incT = Vector3d::Zero();
 		for (int level = maxPyramidLevel - 1; level >= 0; level--)
 		{
 			int n = height >> level;
@@ -1137,7 +1159,7 @@ public:
 						}
 #endif
 						residualImage.at<uchar>(u, v) = (uchar)r_fabs;
-						currentError += w*r;
+						currentError += w*r_fabs;
 
 //#pragma omp critical (actualNum)
 						{
@@ -1177,12 +1199,22 @@ public:
 
 				if (currentError > lastError){
 					//revert
-					updateR_T(tmpR, tmpT, -last_delta_v, -last_delta_w );
+					updateR_T(tmpR, tmpT, -last_delta_v, -last_delta_w, incR, incT );
 					break;
 				}
 				else{
 					lastError = currentError;
 				}
+
+#ifdef ADD_VELOCITY_PRIOR
+				Sophus::SE3 inc(incR, incT);
+				VectorXd current_xi = inc.log().cast<double>();
+
+				ATA.block(0, 0, 3, 3) += weightLinearVel * Matrix3d::Identity();
+				ATA.block(3, 3, 3, 3) += weightRotationVel * Matrix3d::Identity();
+				ATb.segment(0, 3) -= weightLinearVel *current_xi.segment(0, 3);
+				ATb.segment(3, 3) -= weightRotationVel *current_xi.segment(3, 3);
+#endif
 
 				LLT<MatrixXd> lltOfA = ATA.llt();
 				ComputationInfo info = lltOfA.info();
@@ -1204,7 +1236,7 @@ public:
 					w(0) = -x(3);
 					w(1) = -x(4);
 					w(2) = -x(5);
-					updateR_T(tmpR, tmpT, v, w);
+					updateR_T(tmpR, tmpT, v, w, incR, incT);
 					last_delta_v = v;
 					last_delta_w = w;
 

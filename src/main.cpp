@@ -700,13 +700,13 @@ int main()
 			tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
 #endif
 		}
-		if (i >= 580)
-		{
-			imshow("currentImage", residualImage );
-			imshow("grayImage", grayImage[0]);
-			char c = waitKey(0);
-			//printf("%c\n", c);
-		}
+		//if (i >= 580)
+		//{
+		//	imshow("currentImage", residualImage );
+		//	imshow("grayImage", grayImage[0]);
+		//	char c = waitKey(0);
+		//	//printf("%c\n", c);
+		//}
 	}
 	fileOutput.close();
 
