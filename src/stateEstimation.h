@@ -239,8 +239,8 @@ public:
 			current->pixelInfo[level].AijTAij.resize(n*m);
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 
-			omp_set_num_threads(ompNumThreads);
-#pragma omp parallel for 
+//			omp_set_num_threads(ompNumThreads);
+//#pragma omp parallel for 
 			for (int u = 0; u < n; u++)
 			{
 				for (int v = 0; v < m; v++)
@@ -363,8 +363,8 @@ public:
 			//memcpy(pGradientY, gradientYMap.data, height*width*sizeof(double));
 
 			//calculate gradient map
-			omp_set_num_threads(ompNumThreads);
-#pragma omp parallel for 
+//			omp_set_num_threads(ompNumThreads);
+//#pragma omp parallel for 
 			for (int i = height - 2; i > 0; i--)
 			{
 				for (int j = width - 2; j > 0; j--)
@@ -391,8 +391,8 @@ public:
 				}
 			}
 
-			omp_set_num_threads(ompNumThreads);
-#pragma omp parallel for 
+//			omp_set_num_threads(ompNumThreads);
+//#pragma omp parallel for 
 			for (int i = height - 2; i > 0; i--)
 			{
 
@@ -409,8 +409,8 @@ public:
 				pGradientY[INDEX(i, width, height, width)] = pGradientY[INDEX(i, width - 2, height, width)];
 			}
 
-			omp_set_num_threads(ompNumThreads);
-#pragma omp parallel for 
+//			omp_set_num_threads(ompNumThreads);
+//#pragma omp parallel for 
 			for (int j = width - 1; j >= 0; j--)
 			{
 
@@ -900,8 +900,8 @@ public:
 			current->pixelInfo[level].AijTAij.resize(n*m);
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 
-			omp_set_num_threads(ompNumThreads);
-#pragma omp parallel for 
+//			omp_set_num_threads(ompNumThreads);
+//#pragma omp parallel for 
 			for (int u = 0; u < n; u++)
 			{
 				for (int v = 0; v < m; v++)
@@ -1155,11 +1155,10 @@ public:
 #ifdef WEIGHTEDCOST
 						if (r_fabs > huberKernelThreshold){
 							w = huberKernelThreshold / (r_fabs);
-              currentError += r_fabs ;
 						}
 #endif
 						residualImage.at<uchar>(u, v) = (uchar)r_fabs;
-
+						currentError += w*r_fabs;
 //#pragma omp critical (actualNum)
 						{
 							actualNum++;
