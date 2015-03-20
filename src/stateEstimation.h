@@ -80,16 +80,15 @@ public:
 struct PIXEL_INFO_IN_A_FRAME
 {
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-	vector<bool> valid;
 	vector<MatrixXd> Aij;
 	vector<MatrixXd> AijTAij;
-	vector<Vector3d> pi;
+	MatrixXd piList;
+	vector<double> intensity;
 	PIXEL_INFO_IN_A_FRAME()
 	{
 		Aij.clear();
 		AijTAij.clear();
-		pi.clear();
-		valid.clear();
+		intensity.clear();
 	}
 	~PIXEL_INFO_IN_A_FRAME(){
 	}
@@ -203,140 +202,141 @@ public:
 
 	void insertFrame(const Mat grayImage[maxPyramidLevel], const Mat depthImage[maxPyramidLevel], const Matrix3d& R, const Vector3d& T, CAMER_PARAMETERS* para )
 	{
-		STATE *current = this;
-		Mat currentDepthImage;
-
-		//init the intensity and the depth value
-		int n = IMAGE_HEIGHT;
-		int m = IMAGE_WIDTH;
-		for (int i = 0; i < maxPyramidLevel; i++)
-		{
-			memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
-			memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
-			n >>= 1;
-			m >>= 1;
-		}
-
-		//init the graident map
-		current->computeGradientMap( grayImage ) ;
-
-		//init the pixel info in a frame
-		for (int level = maxPyramidLevel - 1; level >= 0; level--)
-		{
-			int n = IMAGE_HEIGHT >> level;
-			int m = IMAGE_WIDTH >> level;
-			float* pDepth = current->depthImage[level];
-			double* pGradientX = current->gradientX[level];
-			double* pGradientY = current->gradientY[level];
-
-			current->pixelInfo[level].valid.clear();
-			current->pixelInfo[level].valid.resize(n*m);
-			current->pixelInfo[level].pi.clear();
-			current->pixelInfo[level].pi.resize(n*m);
-			current->pixelInfo[level].Aij.clear();
-			current->pixelInfo[level].Aij.resize(n*m);
-			current->pixelInfo[level].AijTAij.clear();
-			current->pixelInfo[level].AijTAij.resize(n*m);
-			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
-
-//			omp_set_num_threads(ompNumThreads);
-//#pragma omp parallel for 
-			for (int u = 0; u < n; u++)
-			{
-				for (int v = 0; v < m; v++)
-				{
-					int k = INDEX(u, v, n, m);
-					double Z = pDepth[k];
-					if (Z < zeroThreshold) {
-						currentPixelInfo.valid[k] = false;
-						continue;
-					}
-					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-						currentPixelInfo.valid[k] = false;
-						continue;
-					}
-					currentPixelInfo.valid[k] = true;
-
-					double X = (v - para->cx[level]) * Z / para->fx[level];
-					double Y = (u - para->cy[level]) * Z / para->fy[level];
-
-					currentPixelInfo.pi[k] << X, Y, Z;
-
-					MatrixXd oneBytwo(1, 2);
-					MatrixXd twoBySix(2, 6);
-
-					oneBytwo(0, 0) = pGradientX[k];
-					oneBytwo(0, 1) = pGradientY[k];
-
-					twoBySix(0, 0) = para->fx[level] / Z;
-					twoBySix(0, 1) = 0;
-					twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
-					twoBySix(1, 0) = 0;
-					twoBySix(1, 1) = para->fy[level] / Z;
-					twoBySix(1, 2) = -Y * para->fy[level] / SQ(Z);
-
-					twoBySix(0, 3) = twoBySix(0, 2) * Y;
-					twoBySix(0, 4) = twoBySix(0, 0)*Z - twoBySix(0, 2)*X;
-					twoBySix(0, 5) = -twoBySix(0, 0)*Y;
-					twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y;
-					twoBySix(1, 4) = -twoBySix(1, 2)* X;
-					twoBySix(1, 5) = twoBySix(1, 1)* X;
-
-					//currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
-					currentPixelInfo.Aij[k] = (oneBytwo*twoBySix).transpose();
-					currentPixelInfo.AijTAij[k] = currentPixelInfo.Aij[k] * currentPixelInfo.Aij[k].transpose();
-					/*
-					int k = INDEX(u, v, n, m);
-					double Z = pDepth[k];
-					if (Z < zeroThreshold) {
-						currentPixelInfo.valid[k] = false;
-						continue;
-					}
-					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-						currentPixelInfo.valid[k] = false;
-						continue;
-					}
-					currentPixelInfo.valid[k] = true;
-
-					double X = (v - para->cx[level]) * Z / para->fx[level];
-					double Y = (u - para->cy[level]) * Z / para->fy[level];
-
-					currentPixelInfo.pi[k] << X, Y, Z;
-
-					MatrixXd oneBytwo(1, 2);
-					MatrixXd twoByThree(2, 3);
-					MatrixXd threeBySix(3, 6);
-					MatrixXd oneBySix(1, 6);
-
-					oneBytwo(0, 0) = pGradientX[k];
-					oneBytwo(0, 1) = pGradientY[k];
-
-					twoByThree(0, 0) = para->fx[level] / Z;
-					twoByThree(0, 1) = 0;
-					twoByThree(0, 2) = -X * para->fx[level] / SQ(Z);
-					twoByThree(1, 0) = 0;
-					twoByThree(1, 1) = para->fy[level] / Z;
-					twoByThree(1, 2) = -Y * para->fy[level] / SQ(Z);
-
-					threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
-					threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
-					threeBySix(0, 4) = Z;
-					threeBySix(1, 3) = -Z;
-					threeBySix(0, 5) = -Y;
-					threeBySix(2, 3) = Y;
-					threeBySix(1, 5) = X;
-					threeBySix(2, 4) = -X;
-
-					currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
-					currentPixelInfo.AijTAij[k] = currentPixelInfo.Aij[k] * currentPixelInfo.Aij[k].transpose();
-					*/
-				}
-			}
-		}
-
-		//init the pose
-		current->R_k0 = R;
-		current->T_k0 = T;
+//		STATE *current = this;
+//		Mat currentDepthImage;
+//
+//		//init the intensity and the depth value
+//		int n = IMAGE_HEIGHT;
+//		int m = IMAGE_WIDTH;
+//		for (int i = 0; i < maxPyramidLevel; i++)
+//		{
+//			memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
+//			memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
+//			n >>= 1;
+//			m >>= 1;
+//		}
+//
+//		//init the graident map
+//		current->computeGradientMap( grayImage ) ;
+//
+//		//init the pixel info in a frame
+//		for (int level = maxPyramidLevel - 1; level >= 0; level--)
+//		{
+//			int n = IMAGE_HEIGHT >> level;
+//			int m = IMAGE_WIDTH >> level;
+//			float* pDepth = current->depthImage[level];
+//			double* pGradientX = current->gradientX[level];
+//			double* pGradientY = current->gradientY[level];
+//
+//			current->pixelInfo[level].valid.clear();
+//			current->pixelInfo[level].valid.resize(n*m);
+//			current->pixelInfo[level].pi.clear();
+//			current->pixelInfo[level].pi.resize(n*m);
+//			current->pixelInfo[level].Aij.clear();
+//			current->pixelInfo[level].Aij.resize(n*m);
+//			current->pixelInfo[level].AijTAij.clear();
+//			current->pixelInfo[level].AijTAij.resize(n*m);
+//			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
+//
+////			omp_set_num_threads(ompNumThreads);
+////#pragma omp parallel for 
+//			for (int u = 0; u < n; u++)
+//			{
+//				for (int v = 0; v < m; v++)
+//				{
+//					int k = INDEX(u, v, n, m);
+//					double Z = pDepth[k];
+//					if (Z < zeroThreshold) {
+//						currentPixelInfo.valid[k] = false;
+//						continue;
+//					}
+//					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
+//						currentPixelInfo.valid[k] = false;
+//						continue;
+//					}
+//					currentPixelInfo.valid[k] = true;
+//
+//					double X = (v - para->cx[level]) * Z / para->fx[level];
+//					double Y = (u - para->cy[level]) * Z / para->fy[level];
+//
+//					currentPixelInfo.pi[k] << X, Y, Z;
+//
+//					MatrixXd oneBytwo(1, 2);
+//					MatrixXd twoBySix(2, 6);
+//
+//					oneBytwo(0, 0) = pGradientX[k];
+//					oneBytwo(0, 1) = pGradientY[k];
+//
+//					twoBySix(0, 0) = para->fx[level] / Z;
+//					twoBySix(0, 1) = 0;
+//					twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
+//					twoBySix(1, 0) = 0;
+//					twoBySix(1, 1) = para->fy[level] / Z;
+//					twoBySix(1, 2) = -Y * para->fy[level] / SQ(Z);
+//
+//					twoBySix(0, 3) = twoBySix(0, 2) * Y;
+//					twoBySix(0, 4) = twoBySix(0, 0)*Z - twoBySix(0, 2)*X;
+//					twoBySix(0, 5) = -twoBySix(0, 0)*Y;
+//					twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y;
+//					twoBySix(1, 4) = -twoBySix(1, 2)* X;
+//					twoBySix(1, 5) = twoBySix(1, 1)* X;
+//
+//					//currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
+//					currentPixelInfo.Aij[k] = (oneBytwo*twoBySix).transpose();
+//					currentPixelInfo.AijTAij[k] = currentPixelInfo.Aij[k] * currentPixelInfo.Aij[k].transpose();
+//					/*
+//					int k = INDEX(u, v, n, m);
+//					double Z = pDepth[k];
+//					if (Z < zeroThreshold) {
+//						currentPixelInfo.valid[k] = false;
+//						continue;
+//					}
+//					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
+//						currentPixelInfo.valid[k] = false;
+//						continue;
+//					}
+//					currentPixelInfo.valid[k] = true;
+//
+//					double X = (v - para->cx[level]) * Z / para->fx[level];
+//					double Y = (u - para->cy[level]) * Z / para->fy[level];
+//
+//					currentPixelInfo.pi[k] << X, Y, Z;
+//
+//					MatrixXd oneBytwo(1, 2);
+//					MatrixXd twoByThree(2, 3);
+//					MatrixXd threeBySix(3, 6);
+//					MatrixXd oneBySix(1, 6);
+//
+//					oneBytwo(0, 0) = pGradientX[k];
+//					oneBytwo(0, 1) = pGradientY[k];
+//
+//					twoByThree(0, 0) = para->fx[level] / Z;
+//					twoByThree(0, 1) = 0;
+//					twoByThree(0, 2) = -X * para->fx[level] / SQ(Z);
+//					twoByThree(1, 0) = 0;
+//					twoByThree(1, 1) = para->fy[level] / Z;
+//					twoByThree(1, 2) = -Y * para->fy[level] / SQ(Z);
+//
+//					threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
+//					threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
+//					threeBySix(0, 4) = Z;
+//					threeBySix(1, 3) = -Z;
+//					threeBySix(0, 5) = -Y;
+//					threeBySix(2, 3) = Y;
+//					threeBySix(1, 5) = X;
+//					threeBySix(2, 4) = -X;
+//
+//					currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
+//					currentPixelInfo.AijTAij[k] = currentPixelInfo.Aij[k] * currentPixelInfo.Aij[k].transpose();
+//					*/
+//				}
+//			}
+//		}
+//
+//		//init the pose
+//		current->R_k0 = R;
+//		current->T_k0 = T;
+//		
 	}
 
 	void computeGradientMap( const Mat grayImage[maxPyramidLevel] )
@@ -887,21 +887,11 @@ public:
 			int n = height >> level;
 			int m = width >> level;
 			float* pDepth = current->depthImage[level];
+			unsigned char*pIntensity = current->intensity[level];
 			double* pGradientX = current->gradientX[level];
 			double* pGradientY = current->gradientY[level];
 
-			current->pixelInfo[level].valid.clear();
-			current->pixelInfo[level].valid.resize(n*m);
-			current->pixelInfo[level].pi.clear();
-			current->pixelInfo[level].pi.resize(n*m);
-			current->pixelInfo[level].Aij.clear();
-			current->pixelInfo[level].Aij.resize(n*m);
-			current->pixelInfo[level].AijTAij.clear();
-			current->pixelInfo[level].AijTAij.resize(n*m);
-			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
-
-//			omp_set_num_threads(ompNumThreads);
-//#pragma omp parallel for 
+			int validNum = 0;
 			for (int u = 0; u < n; u++)
 			{
 				for (int v = 0; v < m; v++)
@@ -909,23 +899,50 @@ public:
 					int k = INDEX(u, v, n, m);
 					double Z = pDepth[k];
 					if (Z < zeroThreshold) {
-						currentPixelInfo.valid[k] = false;
 						continue;
 					}
 					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-						currentPixelInfo.valid[k] = false;
 						continue;
 					}
-					currentPixelInfo.valid[k] = true;
+					validNum++;
+				}
+			}
+			//printf("level=%d, validNum=%d\n", level, validNum);
+
+			current->pixelInfo[level].Aij.clear();
+			current->pixelInfo[level].Aij.resize(validNum);
+			current->pixelInfo[level].AijTAij.clear();
+			current->pixelInfo[level].AijTAij.resize(validNum);
+			current->pixelInfo[level].intensity.clear();
+			current->pixelInfo[level].intensity.resize(validNum);
+			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
+			currentPixelInfo.piList.resize(3, validNum);
+
+//			omp_set_num_threads(ompNumThreads);
+//#pragma omp parallel for 
+			int cnt = 0;
+			for (int u = 0; u < n; u++)
+			{
+				for (int v = 0; v < m; v++)
+				{
+					int k = INDEX(u, v, n, m);
+					double Z = pDepth[k];
+					if (Z < zeroThreshold) {
+						continue;
+					}
+					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
+						continue;
+					}
 
 					double X = (v - para->cx[level]) * Z / para->fx[level];
 					double Y = (u - para->cy[level]) * Z / para->fy[level];
 
-					currentPixelInfo.pi[k] << X, Y, Z;
+					currentPixelInfo.piList(0, cnt) = X;
+					currentPixelInfo.piList(1, cnt) = Y;
+					currentPixelInfo.piList(2, cnt) = Z;
+					currentPixelInfo.intensity[cnt] = pIntensity[k];
 
 					MatrixXd oneBytwo(1, 2);
-					//MatrixXd twoByThree(2, 3);
-					//MatrixXd threeBySix(3, 6);
 					MatrixXd twoBySix(2, 6);
 	
 					oneBytwo(0, 0) = pGradientX[k];
@@ -943,6 +960,7 @@ public:
 					//threeBySix(0, 4) = Z;
 					//threeBySix(1, 3) = -Z;
 					//threeBySix(0, 5) = -Y;
+
 					//threeBySix(2, 3) = Y;
 					//threeBySix(1, 5) = X;
 					//threeBySix(2, 4) = -X;
@@ -962,8 +980,10 @@ public:
 					twoBySix(1, 5) = twoBySix(1, 1)* X;
 
 					//currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
-					currentPixelInfo.Aij[k] = (oneBytwo*twoBySix).transpose();
-					currentPixelInfo.AijTAij[k] = currentPixelInfo.Aij[k] * currentPixelInfo.Aij[k].transpose();
+					currentPixelInfo.Aij[cnt] = (oneBytwo*twoBySix).transpose();
+					currentPixelInfo.AijTAij[cnt] = currentPixelInfo.Aij[cnt] * currentPixelInfo.Aij[cnt].transpose();
+
+					cnt++;
 				}
 			}
 		}
@@ -1050,7 +1070,6 @@ public:
 		{
 			int n = height >> level;
 			int m = width >> level;
-			unsigned char* pIntensity = current->intensity[level];
 			unsigned char *nextIntensity = (unsigned char*)grayImage[level].data;
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 			double lastError = 100000000000.0;
@@ -1091,66 +1110,49 @@ public:
 				MatrixXd ATA = MatrixXd::Zero(6, 6);
 				VectorXd ATb = VectorXd::Zero(6);
 
-//#pragma omp parallel for 
-				for (int u = 0; u < n; u++)
+				MatrixXd pi2List = tmpR * currentPixelInfo.piList;
+
+				int validNum = currentPixelInfo.Aij.size();
+				for (int i = 0; i < validNum; i++)
 				{
-					for (int v = 0; v < m; v++)
-					{
-						int k = INDEX(u, v, n, m);
-						if ( currentPixelInfo.valid[k] == false ) {
+					Vector3d p2 = pi2List.block(0, i, 3, 1) + tmpT;
+					//Vector3d p2 = tmpR* currentPixelInfo.piList.block(0, i, 3, 1) + tmpT;
 
-#ifdef DEBUG_DENSETRACKING
-							residualImage.at<uchar>(u, v) = 0;
-#endif
-							continue;
-						}
+					int u2 = int(p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5);
+					int v2 = int(p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5);
 
-						Vector3d p2 = tmpR * currentPixelInfo.pi[k] + tmpT;
-						int u2 = int( p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5 ) ;
-						int v2 = int( p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5 ) ;
+					double reprojectIntensity;
+					if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
+						continue;
+					}
+					//if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
+					//	continue;
+					//}
 
-						double reprojectIntensity;
-						if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
-							continue;
-						}
-						//if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-						//	continue;
-						//}
-
-//#ifdef DEBUG_DENSETRACKING
-//						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
-//						next.at<cv::Vec3b>(u2, v2)[1] = proportion*next.at<cv::Vec3b>(u2, v2)[1] + (1 - proportion) * G[pointsLabel[i]];
-//						next.at<cv::Vec3b>(u2, v2)[2] = proportion*next.at<cv::Vec3b>(u2, v2)[2] + (1 - proportion) * B[pointsLabel[i]];
-//#endif
-						double w = 1.0;
-						//double r = pIntensity[k] - nextIntensity[INDEX(u2, v2, n, m)];
-						double r = pIntensity[k] - reprojectIntensity ;
-						double r_fabs = fabs(r);			
+					//#ifdef DEBUG_DENSETRACKING
+					//						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
+					//						next.at<cv::Vec3b>(u2, v2)[1] = proportion*next.at<cv::Vec3b>(u2, v2)[1] + (1 - proportion) * G[pointsLabel[i]];
+					//						next.at<cv::Vec3b>(u2, v2)[2] = proportion*next.at<cv::Vec3b>(u2, v2)[2] + (1 - proportion) * B[pointsLabel[i]];
+					//#endif
+					double w = 1.0;
+					//double r = pIntensity[k] - nextIntensity[INDEX(u2, v2, n, m)];
+					double r = currentPixelInfo.intensity[i] - reprojectIntensity;
+					double r_fabs = fabs(r);
 
 #ifdef WEIGHTEDCOST
-						if (r_fabs > huberKernelThreshold){
-							w = huberKernelThreshold / (r_fabs);
-						}
+					if (r_fabs > huberKernelThreshold){
+						w = huberKernelThreshold / (r_fabs);
+					}
 #endif
 
 #ifdef DEBUG_DENSETRACKING
-						residualImage.at<uchar>(u, v) = (uchar)r_fabs;
+					residualImage.at<uchar>(u, v) = (uchar)r_fabs;
 #endif
-						currentError += w*r_fabs;
-//#pragma omp critical (actualNum)
-						{
-							actualNum++;
-						}
-//#pragma omp critical (ATA)
-						{
-							ATA += w*currentPixelInfo.AijTAij[k];
-						}
-//#pragma omp critical (ATb)
-						{
-							ATb -= w*r*currentPixelInfo.Aij[k];
-						}
+					currentError += w*r_fabs;
+					actualNum++;
+					ATA += w*currentPixelInfo.AijTAij[i];
+					ATb -= w*r*currentPixelInfo.Aij[i];
 
-					}
 				}
 
 #ifdef DEBUG_DENSETRACKING

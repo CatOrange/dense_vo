@@ -29,7 +29,7 @@ using namespace cv;
 using namespace Eigen;
 const int numImage = 800;
 const int groundTruthDataNum = 5000;
-char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_near\\" ;
+char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_far\\" ;
 char depthDataPath[256] ;
 char rgbDataPath[256] ;
 char rgbListPath[256] ;
@@ -682,17 +682,18 @@ int main()
 			|| currentT.norm() > translationThreshold )*/
 		if ((i % 10) == 1)
 		{
+			//double t = (double)cvGetTickCount();
+
 			slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
 
 			cout << "estimate position[before BA]:\n" 
 				<< slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
 
-			double t = (double)cvGetTickCount();
 
 			//slidingWindows.PhotometricBA();
 
-			t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
-			printf("BA cal time: %f\n", t);
+			//t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
+			//printf("BA cal time: %f\n", t);
 
 			//slidingWindows.planeDection();
 
