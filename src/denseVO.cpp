@@ -1,5 +1,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 
+//unroll loops, utility, unroller
+
 //for ROS
 #include "ros/ros.h"
 #include "tf/transform_broadcaster.h"
@@ -229,7 +231,7 @@ void estimateCurrentState()
     //cv::imshow("Resid", falseColorsMap);
     //cv::waitKey(10) ;
 
-    if ((cnt % 10) == 1)
+    if ((cnt % 5) == 1)
     {
         slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
 
