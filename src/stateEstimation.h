@@ -1013,14 +1013,14 @@ public:
 		return skewW;
 	}
 
-	void updateR_T(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w, Matrix3d& incR, Vector3d& incT )
+	void updateR_T(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w, Matrix3d& incR, Vector3d& incT)
 	{
-		Matrix3d skewW = vectorToSkewMatrix(w) ;
+		Matrix3d skewW = vectorToSkewMatrix(w);
 
 		double theta = sqrt(w.squaredNorm());
 
 		Matrix3d deltaR = Matrix3d::Identity() + (sin(theta) / theta)*skewW + ((1 - cos(theta)) / (theta*theta))*skewW*skewW;
-		Vector3d deltaT = (Matrix3d::Identity() + ((1 - cos(theta)) / (theta*theta)) *skewW + ( (theta - sin(theta)) / (theta*theta*theta)*skewW*skewW) ) * v;
+		Vector3d deltaT = (Matrix3d::Identity() + ((1 - cos(theta)) / (theta*theta)) *skewW + ((theta - sin(theta)) / (theta*theta*theta)*skewW*skewW)) * v;
 		//Matrix3d newR = R*deltaR.transpose();
 		//Vector3d newT = -R*deltaR.transpose()*deltaT + T;
 
@@ -1050,9 +1050,6 @@ public:
 		{
 			int n = height >> level;
 			int m = width >> level;
-//			float* pDepth = current->depthImage[level];
-//			double* pGradientX = current->gradientX[level];
-//			double* pGradientY = current->gradientY[level];
 			unsigned char* pIntensity = current->intensity[level];
 			unsigned char *nextIntensity = (unsigned char*)grayImage[level].data;
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
@@ -1060,52 +1057,27 @@ public:
 			last_delta_v.Zero();
 			last_delta_w.Zero();
 
-//#ifdef DEBUG_DENSETRACKING
-//			double proportion = 0.3;
-//			Mat now(n, m, CV_8UC3);
-//			Mat next;
-//			cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
-//			for (int i = 0; i < n; i++)
-//			{
-//				for (int j = 0; j < m; j++){
-//					now.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
-//					now.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
-//					now.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
-//				}
-//			}
-//			int sz = current->listOfSuperpixels.size();
-//			RNG rng(666);
-//			vector<short>R(sz);
-//			vector<short>G(sz);
-//			vector<short>B(sz);
-//			for (int i = 0; i < sz; i++){
-//				R[i] = rng.uniform(0, 255);
-//				G[i] = rng.uniform(0, 255);
-//				B[i] = rng.uniform(0, 255);
-//			}
-//			for (int i = 0; i < sz; i++)
-//			{
-//				int listSz = current->listOfSuperpixels[i].superpixelsInPyramid[level].listOfU.size();
-//				for (int j = 0; j < listSz; j++)
-//				{
-//					int u = current->listOfSuperpixels[i].superpixelsInPyramid[level].listOfU[j];
-//					int v = current->listOfSuperpixels[i].superpixelsInPyramid[level].listOfV[j];
-//					now.at<cv::Vec3b>(u, v)[0] = proportion*now.at<cv::Vec3b>(u, v)[0] + (1 - proportion) * R[i];
-//					now.at<cv::Vec3b>(u, v)[1] = proportion*now.at<cv::Vec3b>(u, v)[1] + (1 - proportion) * G[i];
-//					now.at<cv::Vec3b>(u, v)[2] = proportion*now.at<cv::Vec3b>(u, v)[2] + (1 - proportion) * B[i];
-//				}
-//			}
-//			vector<int>pointsLabel(n*m);
-//#endif
-//
-//			Matrix3d backupR;
-//			Vector3d backupT;
-//			double error = -1;
-//			//vector<MatrixXd> Aij(n*m);
-//			//vector<MatrixXd> AijTAij(n*m);
-//			//vector<Vector3d> pi(n*m);
-//
-			
+#ifdef DEBUG_DENSETRACKING
+			float* pDepth = current->depthImage[level];
+			double* pGradientX = current->gradientX[level];
+			double* pGradientY = current->gradientY[level];
+			double proportion = 0.3;
+
+			Mat now(n, m, CV_8UC3);
+			Mat next;
+			cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
+			for (int i = 0; i < n; i++)
+			{
+				for (int j = 0; j < m; j++)
+				{
+					if (SQ(pGradientX[INDEX(i, j, n, m)]) + SQ(pGradientY[INDEX(i, j, n, m)]) )
+					now.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
+					now.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
+					now.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
+				}
+			}
+#endif
+		
 			for (int ith = 0; ith < maxIteration; ith++)
 			{
 #ifdef DEBUG_DENSETRACKING
@@ -1126,7 +1098,10 @@ public:
 					{
 						int k = INDEX(u, v, n, m);
 						if ( currentPixelInfo.valid[k] == false ) {
+
+#ifdef DEBUG_DENSETRACKING
 							residualImage.at<uchar>(u, v) = 0;
+#endif
 							continue;
 						}
 
@@ -1142,11 +1117,11 @@ public:
 						//	continue;
 						//}
 
-#ifdef DEBUG_DENSETRACKING
-						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
-						next.at<cv::Vec3b>(u2, v2)[1] = proportion*next.at<cv::Vec3b>(u2, v2)[1] + (1 - proportion) * G[pointsLabel[i]];
-						next.at<cv::Vec3b>(u2, v2)[2] = proportion*next.at<cv::Vec3b>(u2, v2)[2] + (1 - proportion) * B[pointsLabel[i]];
-#endif
+//#ifdef DEBUG_DENSETRACKING
+//						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
+//						next.at<cv::Vec3b>(u2, v2)[1] = proportion*next.at<cv::Vec3b>(u2, v2)[1] + (1 - proportion) * G[pointsLabel[i]];
+//						next.at<cv::Vec3b>(u2, v2)[2] = proportion*next.at<cv::Vec3b>(u2, v2)[2] + (1 - proportion) * B[pointsLabel[i]];
+//#endif
 						double w = 1.0;
 						//double r = pIntensity[k] - nextIntensity[INDEX(u2, v2, n, m)];
 						double r = pIntensity[k] - reprojectIntensity ;
@@ -1157,7 +1132,10 @@ public:
 							w = huberKernelThreshold / (r_fabs);
 						}
 #endif
+
+#ifdef DEBUG_DENSETRACKING
 						residualImage.at<uchar>(u, v) = (uchar)r_fabs;
+#endif
 						currentError += w*r_fabs;
 //#pragma omp critical (actualNum)
 						{

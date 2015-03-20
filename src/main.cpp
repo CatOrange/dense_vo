@@ -29,7 +29,7 @@ using namespace cv;
 using namespace Eigen;
 const int numImage = 800;
 const int groundTruthDataNum = 5000;
-char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_far\\" ;
+char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_near\\" ;
 char depthDataPath[256] ;
 char rgbDataPath[256] ;
 char rgbListPath[256] ;
@@ -409,6 +409,51 @@ void RtoEulerAngles(Matrix3d R, double a[3])
 	a[2] = (R(1, 0) - R(0, 1)) / (2.0* sin(theta));
 }
 
+int tmpGradientThreshold = 0;
+
+void on_trackbar(int, void*)
+{
+	STATE* current = &slidingWindows.states[slidingWindows.tail];
+
+	for (int level = 0; level >= 0; level--)
+	{
+		float* pDepth = current->depthImage[level];
+		int n = IMAGE_HEIGHT >> level;
+		int m = IMAGE_WIDTH >> level;
+		unsigned char* pIntensity = current->intensity[level];
+		unsigned char *nextIntensity = (unsigned char*)grayImage[level].data;
+		double* pGradientX = current->gradientX[level];
+		double* pGradientY = current->gradientY[level];
+		double proportion = 0.3;
+
+		Mat now(n, m, CV_8UC3);
+		Mat next;
+		cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
+		int num = 0;
+		for (int i = 0; i < n; i++)
+		{
+			for (int j = 0; j < m; j++)
+			{
+				if (SQ(pGradientX[INDEX(i, j, n, m)]) + SQ(pGradientY[INDEX(i, j, n, m)]) < tmpGradientThreshold )
+				{
+					now.at<cv::Vec3b>(i, j)[0] = 0;
+					now.at<cv::Vec3b>(i, j)[1] = 255;
+					now.at<cv::Vec3b>(i, j)[2] = 0;
+				}
+				else
+				{
+					num++;
+					now.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
+					now.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
+					now.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
+				}
+			}
+		}
+		imshow("effect", now);
+		printf("num=%d\n", num);
+	}
+}
+
 int main()
 {
 	//init();
@@ -598,7 +643,11 @@ int main()
 			continue;
 		}
 
-		
+		//tmpGradientThreshold = 0;
+		//namedWindow("effect", 1);
+		//createTrackbar("graidenThreshold", "effect", &tmpGradientThreshold, 200, on_trackbar);
+		//on_trackbar(tmpGradientThreshold, 0);
+		//cv::waitKey(0);
 
 		//double t = (double)cvGetTickCount();
 

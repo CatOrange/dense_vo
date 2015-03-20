@@ -39,7 +39,6 @@ const double cosThreshold = cos(10.0 / 180 * PI);
 //#define DEBUG_BA
 const int slidingWindowSize = 10;
 const double AverageIntensityError = 80.0;
-const double graidientThreshold = 2.0;
 const double invIntensityCov = 1.0 / (3.0*3.0);
 const double dxOptProportion = 0.1;
 const int maxIterationBA = 3;
@@ -63,6 +62,7 @@ const double validPixelPercentageThreshold = 0.5;
 //#define DEBUG_DENSETRACKING
 //#define FRAME_TO_FRAME
 //#define ADD_VELOCITY_PRIOR
+const double graidientThreshold = 100.0;
 const double updateThreshold = 0.0005;
 const int maxIteration = 20 ;
 const int maxPyramidLevel = 2;
@@ -94,5 +94,5 @@ const int DISPLAY_NUM = 50;
 /*
 for openmp
 */
-const int ompNumThreads = 4;
+const int ompNumThreads = 2;
 #endif
