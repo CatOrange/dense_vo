@@ -1054,7 +1054,7 @@ public:
 		T = newT;
 	}
 
-	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T, Mat& residualImage )
+	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T )
 	{
 		//no assumption on angular and linear velocity
 		Matrix3d tmpR = R;
@@ -1080,19 +1080,31 @@ public:
 			float* pDepth = current->depthImage[level];
 			double* pGradientX = current->gradientX[level];
 			double* pGradientY = current->gradientY[level];
+			unsigned char* pIntensity = current->intensity[level];
 			double proportion = 0.3;
 
 			Mat now(n, m, CV_8UC3);
+			Mat gradientMap(n, m, CV_8UC3) ;
 			Mat next;
-			cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
+			Mat residualImage(n, m, CV_8U);
+			//cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
 			for (int i = 0; i < n; i++)
 			{
 				for (int j = 0; j < m; j++)
 				{
-					if (SQ(pGradientX[INDEX(i, j, n, m)]) + SQ(pGradientY[INDEX(i, j, n, m)]) )
-					now.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
-					now.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
-					now.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
+					if (SQ(pGradientX[INDEX(i, j, n, m)]) + SQ(pGradientY[INDEX(i, j, n, m)]) < graidientThreshold )
+					{
+						gradientMap.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
+						gradientMap.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
+						gradientMap.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
+					}
+					else
+					{
+						gradientMap.at<cv::Vec3b>(i, j)[0] = 0;
+						gradientMap.at<cv::Vec3b>(i, j)[1] = 255;
+						gradientMap.at<cv::Vec3b>(i, j)[2] = 0;
+					}
+					residualImage.at<uchar>(i, j) = 0;
 				}
 			}
 #endif
@@ -1146,7 +1158,7 @@ public:
 #endif
 
 #ifdef DEBUG_DENSETRACKING
-					residualImage.at<uchar>(u, v) = (uchar)r_fabs;
+					residualImage.at<uchar>(u2, v2) = (uchar)r_fabs*10;
 #endif
 					currentError += w*r_fabs;
 					actualNum++;
@@ -1156,9 +1168,14 @@ public:
 				}
 
 #ifdef DEBUG_DENSETRACKING
-				cv::imshow("now", now);
+				cv::imshow("gradientMap", gradientMap);
 				cv::imshow("next", next);
-				cv::waitKey(0);
+
+				cv::Mat falsecolorsmap;
+				cv::applyColorMap(residualImage, falsecolorsmap, cv::COLORMAP_RAINBOW);
+				cv::imshow("Resid", falsecolorsmap);
+
+				cv::waitKey(1000);
 #endif
 
 				if (actualNum < 6){
@@ -1199,9 +1216,9 @@ public:
 				if (info == Success)
 				{
 					VectorXd x = lltOfA.solve(ATb);
-#ifdef DEBUG_DENSETRACKING
-					cout << "x: " << x.transpose() << endl;
-#endif
+//#ifdef DEBUG_DENSETRACKING
+//					cout << "x: " << x.transpose() << endl;
+//#endif
 					//printf("x.norm()=%f\n", x.norm() );
 					Vector3d w, v;
 					v(0) = -x(0);
@@ -1214,10 +1231,9 @@ public:
 					last_delta_v = v;
 					last_delta_w = w;
 
-					//printf("ith=%d norm=%f error=%f\n", ith, maxAbsValueOfVector(x), currentError );
-#ifdef DEBUG_DENSETRACKING
-					printf("ith=%d num=%d norm=%f error=%f\n", ith, actualNum, x.norm(), currentError);
-#endif
+//#ifdef DEBUG_DENSETRACKING
+//					printf("ith=%d num=%d norm=%f error=%f\n", ith, actualNum, x.norm(), currentError);
+//#endif
 					//if ( maxAbsValueOfVector(x) < updateThreshold){
 					if (x.norm() < updateThreshold){
 						break;
