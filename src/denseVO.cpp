@@ -78,7 +78,6 @@ visualization_msgs::Marker path_line;
 Mat rgbImage;
 Mat depthImage[maxPyramidLevel];
 Mat grayImage[maxPyramidLevel];
-Mat residualImage(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8U);
 STATE tmpState;
 STATE* lastFrame;
 
@@ -107,7 +106,7 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
     Matrix3d nextR = Matrix3d::Identity();
     Vector3d nextT = Vector3d::Zero();
-    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT, residualImage);
+    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT);
 
     T_k_c = nextR * T_k_c + nextT;
     R_k_c = nextR * R_k_c;
@@ -116,7 +115,7 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 void keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
 {
     STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c, residualImage);
+    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -299,7 +298,7 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
 //    printf("%d %d %d %d %d\n", grayImage[0].at<uchar>(160, 120), grayImage[0].at<uchar>(10, 10),
 //            grayImage[0].at<uchar>(310, 230), grayImage[0].at<uchar>(0, 230), grayImage[0].at<uchar>(310, 10) ) ;
 
-    //printf("depth = %f\n", depthImage[0].at<float>(240, 320) ) ;
+    //printf("depth = %f\n", depthImage[0].at<float>(120, 160) ) ;
 
     //grayImage
 //#ifdef DOWNSAMPLING
@@ -327,9 +326,41 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
 void depthImageCallBack(const sensor_msgs::ImageConstPtr& msg)
 {
     //cout << "depth: " << msg->header.stamp << endl ;
-    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO16 );
-    cv_ptr->image.convertTo(depthImage[0], CV_32F );
-    //depthImage[0] = cv_ptr->image.clone() ;
+    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::TYPE_32FC1 );
+    //cv_ptr->image.convertTo(depthImage[0], CV_32F );
+    depthImage[0] = cv_ptr->image.clone() ;
+}
+
+void fun()
+{
+    cv::Mat rgbImage ;
+    ros::Rate loop_rate(30) ;
+
+    PrimeSenseCam cam;
+    cam.start();
+   // while( ros::ok() )
+    while( true )
+    {
+        cam.retriveFrame( rgbImage, depthImage[0]) ;
+        cvtColor(rgbImage, grayImage[0], CV_BGR2GRAY);
+        depthImage[0] /= 1000;
+
+        for (int kk = 1; kk < maxPyramidLevel; kk++){
+            pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
+        }
+
+        for (int kk = 1; kk < maxPyramidLevel; kk++){
+            pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
+        }
+
+        estimateCurrentState() ;
+
+        //sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", grayImage[0]).toImageMsg() ;
+        //pub_grayImage.publish( msg ) ;
+
+        //ros::spinOnce();
+        //loop_rate.sleep();
+    }
 }
 
 int main(int argc, char** argv )
@@ -340,8 +371,9 @@ int main(int argc, char** argv )
     //ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug);
     image_transport::ImageTransport it(n) ;
 
-    sub_image = it.subscribe("camera/grayImage", 20, &grayImageCallBack);
-    sub_depth = it.subscribe("/camera/depthImage", 20, &depthImageCallBack);
+    //sub_image = it.subscribe("camera/grayImage", 20, &grayImageCallBack);
+    //sub_depth = it.subscribe("/camera/depthImage", 20, &depthImageCallBack);
+
     //sub_image = it.subscribe("/camera/rgb/image_color", 100, &rgbImageCallBack);
     //sub_depth = it.subscribe("/camera/depth/image", 100, &depthImageCallBack);
 
@@ -366,7 +398,8 @@ int main(int argc, char** argv )
     path_line.points.push_back( geometry_msgs::Point());
     pub_path.publish(path_line);
 
-    //fun() ;
+    pub_grayImage = it.advertise("camera/grayImage", 10 ) ;
+    fun() ;
 
     ros::spin();
 

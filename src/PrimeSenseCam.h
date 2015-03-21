@@ -22,9 +22,10 @@ using namespace std;
 // OpenNI
 #include <openni2/OpenNI.h>
 
-
 // OpenCV
 #include <opencv2/opencv.hpp>
+
+#include "variableDefinition.h"
 
 
 class PrimeSenseCam
@@ -152,8 +153,9 @@ public:
 
 		// setting resolution, FPS, pixel-format
 		openni::VideoMode vMode;
-		vMode.setFps(30);
-		vMode.setResolution(640,480);
+    vMode.setFps(30);
+    vMode.setResolution(IMAGE_WIDTH, IMAGE_HEIGHT);
+    //vMode.setResolution(320,240);
 		vMode.setPixelFormat(openni::PIXEL_FORMAT_RGB888 );
 		openni::Status vmodeColSta = stream.setVideoMode(vMode);
 		vMode.setPixelFormat(openni::PIXEL_FORMAT_DEPTH_1_MM);
@@ -164,11 +166,18 @@ public:
 			exit(1);
 		}
 
-
 		// auto exposure & white balance
 		openni::CameraSettings * camsettings = stream.getCameraSettings();
 		camsettings->setAutoExposureEnabled(false);
 		camsettings->setAutoWhiteBalanceEnabled(false);
+    int exposureTime = 10 ;
+    //camsettings->setGain( 30 ) ;
+    if ( camsettings->setExposure( exposureTime ) != openni::STATUS_OK ){
+      printf("Couldn't set exposure\n");
+    }
+    else{
+      printf("exposure time: %d\n", exposureTime ) ;
+    }
 	}
 
 	void retriveFrame(cv::Mat& rgbImage, cv::Mat& depthImage)
@@ -179,9 +188,9 @@ public:
 			rgbImage = cv::Mat::zeros(pframe->getHeight(), pframe->getWidth(), CV_8UC3);
 		}
 
-		if( depthImage.rows != pHeight || depthImage.cols != pWidth || depthImage.type() != CV_16U )
+    if( depthImage.rows != pHeight || depthImage.cols != pWidth || depthImage.type() != CV_32F )
 		{
-			depthImage = cv::Mat::zeros(pframe->getHeight(), pframe->getWidth(), CV_16U );
+      depthImage = cv::Mat::zeros(pframe->getHeight(), pframe->getWidth(), CV_32F );
 		}
 
 		// Retrive frame from CAM
@@ -193,9 +202,9 @@ public:
 
 		unsigned char * RawData= (unsigned char*)pframe->getData();
 		int k = 0 ;
-		for( int i = 0 ; i < pHeight ; i++ )
+    for( int i = 0 ; i < IMAGE_HEIGHT ; i++ )
 		{
-			for	( int j = 0 ; j < pWidth ; j++ )
+      for	( int j = 0 ; j < IMAGE_WIDTH ; j++ )
 			{
 				rgbImage.at<cv::Vec3b>(i, j)[2] = (uchar)RawData[k++] ;
 				rgbImage.at<cv::Vec3b>(i, j)[1] = (uchar)RawData[k++] ;
@@ -206,11 +215,11 @@ public:
 
 		openni::DepthPixel * d = (openni::DepthPixel *)dframe->getData();
 		k = 0 ;
-		for( int i = 0 ; i < pHeight ; i++ )
+    for( int i = 0 ; i < IMAGE_HEIGHT ; i++ )
 		{
-			for	( int j = 0 ; j < pWidth ; j++ )
+      for	( int j = 0 ; j < IMAGE_WIDTH ; j++ )
 			{
-				depthImage.at<unsigned short>(i, j) = (unsigned short)d[k++] ;
+        depthImage.at<float>(i, j) = float((unsigned short)d[k++]) ;
 			}
 		}
 		//memcpy( &depthImage.data, d, sizeof(CV_16U)*pHeight*pWidth ) ;

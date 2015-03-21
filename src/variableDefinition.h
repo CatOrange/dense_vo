@@ -64,7 +64,7 @@ const double validPixelPercentageThreshold = 0.5;
 //#define ADD_VELOCITY_PRIOR
 const double graidientThreshold = 100.0;
 const double updateThreshold = 0.0005;
-const int maxIteration = 5 ;
+const int maxIteration = 20 ;
 const int maxPyramidLevel = 1;
 const int minDenseTrackingNum = 100;
 const double covRotationVel = 1.0 / 180.0 * PI ;

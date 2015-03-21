@@ -1081,9 +1081,9 @@ public:
 			double* pGradientX = current->gradientX[level];
 			double* pGradientY = current->gradientY[level];
 			unsigned char* pIntensity = current->intensity[level];
-			double proportion = 0.3;
+      //double proportion = 0.3;
 
-			Mat now(n, m, CV_8UC3);
+      //Mat now(n, m, CV_8UC3);
 			Mat gradientMap(n, m, CV_8UC3) ;
 			Mat next;
 			Mat residualImage(n, m, CV_8U);
