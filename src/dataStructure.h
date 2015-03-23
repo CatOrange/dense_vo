@@ -35,6 +35,14 @@ struct HEAPNODE{
 	}
 };
 
+struct GRADIENTNODE{
+  unsigned short u, v ;
+  double cost ;
+  bool operator < (const GRADIENTNODE &a)const{
+    return cost > a.cost;
+  }
+} ;
+
 class minHeap
 {
 public:

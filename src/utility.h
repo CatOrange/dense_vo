@@ -18,6 +18,52 @@ inline double SQ(double a){
 	return a*a;
 }
 
+inline int angelSpace( double dx, double dy)
+{
+  int index = 0 ;
+  if ( dx > 0 )
+  {
+    if ( dx < 0.1 )
+    {
+      if ( dy > 0 ){
+        index = 1 ;
+      }
+      else{
+        index = 6 ;
+      }
+    }
+    else
+    {
+      double angle = atan( dy/dx ) ;
+      if ( angle < 0 ){
+        angle += 2*PI ;
+      }
+      index = angle* 4.0 / PI  ;
+    }
+  }
+  else
+  {
+    if ( dx > -0.1 )
+    {
+      if ( dy > 0 ){
+        index = 2 ;
+      }
+      else{
+        index = 5 ;
+      }
+    }
+    else
+    {
+      double angle = atan( dy/dx ) ;
+      if ( angle < 0 ){
+        angle += 2*PI ;
+      }
+      index = angle* 4.0 / PI  ;
+    }
+  }
+  return index ;
+}
+
 inline bool linearIntepolation(double y, double x, unsigned char* pIntensity , int n, int m, double& result )
 {
 	int leftTopY = floorf(y);

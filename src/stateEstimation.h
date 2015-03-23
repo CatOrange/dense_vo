@@ -892,6 +892,7 @@ public:
 			double* pGradientY = current->gradientY[level];
 
 			int validNum = 0;
+      vector<GRADIENTNODE> gradientList(n*m);
 			for (int u = 0; u < n; u++)
 			{
 				for (int v = 0; v < m; v++)
@@ -901,13 +902,35 @@ public:
 					if (Z < zeroThreshold) {
 						continue;
 					}
-					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-						continue;
-					}
+          if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
+            continue;
+          }
+          gradientList[validNum].cost = SQ(pGradientX[k]) + SQ(pGradientY[k]) ;
+          gradientList[validNum].u = u ;
+          gradientList[validNum].v = v ;
 					validNum++;
 				}
 			}
-			//printf("level=%d, validNum=%d\n", level, validNum);
+      sort( &gradientList[0], &gradientList[validNum] ) ;
+
+      int bin[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+      int tmpCnt = 0 ;
+      int numThrehold = (minDenseTrackingNum >> level)/8 ;
+      //int numThrehold = 1000000000 ;
+      for ( int i = 0 ; i < validNum ; i++ )
+      {
+        int u = gradientList[i].u ;
+        int v = gradientList[i].v ;
+        int k = INDEX(u, v, n, m);
+        int index  = angelSpace(pGradientX[k], pGradientY[k]);
+        if ( bin[index] < numThrehold ){
+          bin[index]++ ;
+          gradientList[tmpCnt++] = gradientList[i] ;
+        }
+      }
+
+      //validNum = std::min( validNum, minDenseTrackingNum >> level ) ;
+      validNum = tmpCnt ;
 
 			current->pixelInfo[level].Aij.clear();
 			current->pixelInfo[level].Aij.resize(validNum);
@@ -920,72 +943,62 @@ public:
 
 //			omp_set_num_threads(ompNumThreads);
 //#pragma omp parallel for 
-			int cnt = 0;
-			for (int u = 0; u < n; u++)
-			{
-				for (int v = 0; v < m; v++)
-				{
-					int k = INDEX(u, v, n, m);
-					double Z = pDepth[k];
-					if (Z < zeroThreshold) {
-						continue;
-					}
-					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-						continue;
-					}
+      for ( int cnt = 0 ; cnt < validNum; cnt++ )
+      {
+        int u = gradientList[cnt].u ;
+        int v = gradientList[cnt].v ;
+        int k = INDEX(u, v, n, m);
+        double Z = pDepth[k];
 
-					double X = (v - para->cx[level]) * Z / para->fx[level];
-					double Y = (u - para->cy[level]) * Z / para->fy[level];
+        double X = (v - para->cx[level]) * Z / para->fx[level];
+        double Y = (u - para->cy[level]) * Z / para->fy[level];
 
-					currentPixelInfo.piList(0, cnt) = X;
-					currentPixelInfo.piList(1, cnt) = Y;
-					currentPixelInfo.piList(2, cnt) = Z;
-					currentPixelInfo.intensity[cnt] = pIntensity[k];
+        currentPixelInfo.piList(0, cnt) = X;
+        currentPixelInfo.piList(1, cnt) = Y;
+        currentPixelInfo.piList(2, cnt) = Z;
+        currentPixelInfo.intensity[cnt] = pIntensity[k];
 
-					MatrixXd oneBytwo(1, 2);
-					MatrixXd twoBySix(2, 6);
-	
-					oneBytwo(0, 0) = pGradientX[k];
-					oneBytwo(0, 1) = pGradientY[k];
+        MatrixXd oneBytwo(1, 2);
+        MatrixXd twoBySix(2, 6);
 
-					//twoByThree(0, 0) = para->fx[level] / Z;
-					//twoByThree(0, 1) = 0;
-					//twoByThree(0, 2) = -X * para->fx[level] / SQ(Z);
-					//twoByThree(1, 0) = 0;
-					//twoByThree(1, 1) = para->fy[level] / Z;
-					//twoByThree(1, 2) = -Y * para->fy[level] / SQ(Z);
+        oneBytwo(0, 0) = pGradientX[k];
+        oneBytwo(0, 1) = pGradientY[k];
 
-					//threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
-					//threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
-					//threeBySix(0, 4) = Z;
-					//threeBySix(1, 3) = -Z;
-					//threeBySix(0, 5) = -Y;
+        //twoByThree(0, 0) = para->fx[level] / Z;
+        //twoByThree(0, 1) = 0;
+        //twoByThree(0, 2) = -X * para->fx[level] / SQ(Z);
+        //twoByThree(1, 0) = 0;
+        //twoByThree(1, 1) = para->fy[level] / Z;
+        //twoByThree(1, 2) = -Y * para->fy[level] / SQ(Z);
 
-					//threeBySix(2, 3) = Y;
-					//threeBySix(1, 5) = X;
-					//threeBySix(2, 4) = -X;
+        //threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
+        //threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
+        //threeBySix(0, 4) = Z;
+        //threeBySix(1, 3) = -Z;
+        //threeBySix(0, 5) = -Y;
 
-					twoBySix(0, 0) = para->fx[level] / Z;
-					twoBySix(0, 1) = 0;
-					twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
-					twoBySix(1, 0) = 0;
-					twoBySix(1, 1) = para->fy[level] / Z;
-					twoBySix(1, 2) = -Y * para->fy[level] / SQ(Z);
+        //threeBySix(2, 3) = Y;
+        //threeBySix(1, 5) = X;
+        //threeBySix(2, 4) = -X;
 
-					twoBySix(0, 3) = twoBySix(0, 2) * Y ;
-					twoBySix(0, 4) = twoBySix(0, 0)*Z - twoBySix(0, 2)*X ;
-					twoBySix(0, 5) = -twoBySix(0, 0)*Y ;
-					twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y ;
-					twoBySix(1, 4) = -twoBySix(1, 2)* X;
-					twoBySix(1, 5) = twoBySix(1, 1)* X;
+        twoBySix(0, 0) = para->fx[level] / Z;
+        twoBySix(0, 1) = 0;
+        twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
+        twoBySix(1, 0) = 0;
+        twoBySix(1, 1) = para->fy[level] / Z;
+        twoBySix(1, 2) = -Y * para->fy[level] / SQ(Z);
 
-					//currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
-					currentPixelInfo.Aij[cnt] = (oneBytwo*twoBySix).transpose();
-					currentPixelInfo.AijTAij[cnt] = currentPixelInfo.Aij[cnt] * currentPixelInfo.Aij[cnt].transpose();
+        twoBySix(0, 3) = twoBySix(0, 2) * Y ;
+        twoBySix(0, 4) = twoBySix(0, 0)*Z - twoBySix(0, 2)*X ;
+        twoBySix(0, 5) = -twoBySix(0, 0)*Y ;
+        twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y ;
+        twoBySix(1, 4) = -twoBySix(1, 2)* X;
+        twoBySix(1, 5) = twoBySix(1, 1)* X;
 
-					cnt++;
-				}
-			}
+        //currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
+        currentPixelInfo.Aij[cnt] = (oneBytwo*twoBySix).transpose();
+        currentPixelInfo.AijTAij[cnt] = currentPixelInfo.Aij[cnt] * currentPixelInfo.Aij[cnt].transpose();
+      }
 		}
 
 		//init the pose
@@ -1044,6 +1057,9 @@ public:
 		//Matrix3d newR = R*deltaR.transpose();
 		//Vector3d newT = -R*deltaR.transpose()*deltaT + T;
 
+//    cout << "deltaR\n" << deltaR << endl ;
+//    cout << "deltaT\n" << deltaT << endl ;
+
 		Matrix3d newR = R*deltaR;
 		Vector3d newT = R*deltaT + T;
 
@@ -1077,36 +1093,28 @@ public:
 			last_delta_w.Zero();
 
 #ifdef DEBUG_DENSETRACKING
-			float* pDepth = current->depthImage[level];
-			double* pGradientX = current->gradientX[level];
-			double* pGradientY = current->gradientY[level];
-			unsigned char* pIntensity = current->intensity[level];
-      //double proportion = 0.3;
+      //if ( level == 0 )
+        //float* pDepth = current->depthImage[level];
+        //double* pGradientX = current->gradientX[level];
+        //double* pGradientY = current->gradientY[level];
+        unsigned char* pIntensity = current->intensity[level];
+        //double proportion = 0.3;
 
-      //Mat now(n, m, CV_8UC3);
-			Mat gradientMap(n, m, CV_8UC3) ;
-			Mat next;
-			Mat residualImage(n, m, CV_8U);
-			//cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
-			for (int i = 0; i < n; i++)
-			{
-				for (int j = 0; j < m; j++)
-				{
-					if (SQ(pGradientX[INDEX(i, j, n, m)]) + SQ(pGradientY[INDEX(i, j, n, m)]) < graidientThreshold )
-					{
-						gradientMap.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
-						gradientMap.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
-						gradientMap.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
-					}
-					else
-					{
-						gradientMap.at<cv::Vec3b>(i, j)[0] = 0;
-						gradientMap.at<cv::Vec3b>(i, j)[1] = 255;
-						gradientMap.at<cv::Vec3b>(i, j)[2] = 0;
-					}
-					residualImage.at<uchar>(i, j) = 0;
-				}
-			}
+        //Mat now(n, m, CV_8UC3);
+        Mat gradientMap(n, m, CV_8UC3) ;
+        Mat next;
+        Mat residualImage(n, m, CV_8U);
+        //cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
+        for (int i = 0; i < n; i++)
+        {
+          for (int j = 0; j < m; j++)
+          {
+              gradientMap.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
+              gradientMap.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
+              gradientMap.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
+          }
+        }
+
 #endif
 		
 			for (int ith = 0; ith < maxIteration; ith++)
@@ -1115,6 +1123,14 @@ public:
 				//cout << tmpR << endl;
 				//cout << tmpT << endl;
 				cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
+
+        for (int i = 0; i < n; i++)
+        {
+          for (int j = 0; j < m; j++)
+          {
+            residualImage.at<uchar>(i, j) = 0;
+          }
+        }
 #endif
 				double currentError = 0;
 				
@@ -1129,6 +1145,16 @@ public:
 				{
 					Vector3d p2 = pi2List.block(0, i, 3, 1) + tmpT;
 					//Vector3d p2 = tmpR* currentPixelInfo.piList.block(0, i, 3, 1) + tmpT;
+
+#ifdef DEBUG_DENSETRACKING
+          Vector3d p1 = currentPixelInfo.piList.block(0, i, 3, 1) ;
+          int u = int(p1(1)*para->fy[level] / p1(2) + para->cy[level] + 0.5);
+          int v = int(p1(0)*para->fx[level] / p1(2) + para->cx[level] + 0.5);
+
+          gradientMap.at<cv::Vec3b>(u, v)[0] = 0;
+          gradientMap.at<cv::Vec3b>(u, v)[1] = 255;
+          gradientMap.at<cv::Vec3b>(u, v)[2] = 0;
+#endif
 
 					int u2 = int(p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5);
 					int v2 = int(p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5);
@@ -1173,9 +1199,13 @@ public:
 
 				cv::Mat falsecolorsmap;
 				cv::applyColorMap(residualImage, falsecolorsmap, cv::COLORMAP_RAINBOW);
-				cv::imshow("Resid", falsecolorsmap);
 
-				cv::waitKey(1000);
+        char tmp[256] ;
+        sprintf(tmp, "Resid" ) ;
+
+        cv::imshow(tmp, falsecolorsmap);
+
+        cv::waitKey(500);
 #endif
 
 				if (actualNum < 6){
@@ -1183,15 +1213,15 @@ public:
 					break;
 				}
 
-				if (actualNum < minDenseTrackingNum ){
-					puts("Dense Tracking: gradients are not rich!");
-					break;
-				}
+//        if (actualNum < (minDenseTrackingNum>>level) ){
+//					puts("Dense Tracking: gradients are not rich!");
+//					break;
+//				}
 
 				if (currentError > lastError){
-					//revert
-					updateR_T(tmpR, tmpT, -last_delta_v, -last_delta_w, incR, incT );
-					break;
+          //revert
+//          updateR_T(tmpR, tmpT, -last_delta_v, -last_delta_w, incR, incT );
+//          break;
 				}
 				else{
 					lastError = currentError;
@@ -1216,9 +1246,15 @@ public:
 				if (info == Success)
 				{
 					VectorXd x = lltOfA.solve(ATb);
-//#ifdef DEBUG_DENSETRACKING
-//					cout << "x: " << x.transpose() << endl;
-//#endif
+
+          MatrixXd L = lltOfA.matrixL();
+
+#ifdef DEBUG_DENSETRACKING
+          cout << "currntError: " << currentError/actualNum << endl ;
+         // cout << "lltofATA.L() " << ith << ":\n" <<  L << endl ;
+         // cout << "ATb " << ith << ":\n" << ATb << endl ;
+         // cout << "dx " << ith << ":\n" << x.transpose() << endl;
+#endif
 					//printf("x.norm()=%f\n", x.norm() );
 					Vector3d w, v;
 					v(0) = -x(0);
@@ -1235,9 +1271,15 @@ public:
 //					printf("ith=%d num=%d norm=%f error=%f\n", ith, actualNum, x.norm(), currentError);
 //#endif
 					//if ( maxAbsValueOfVector(x) < updateThreshold){
-					if (x.norm() < updateThreshold){
-						break;
-					}
+          if ( fabs(x(0)) < minimumUpdateTranslationThreshold
+               && fabs(x(1)) < minimumUpdateTranslationThreshold
+               && fabs(x(2)) < minimumUpdateTranslationThreshold
+               && fabs(x(3)) < minimumUpdateAngularThreshold
+               && fabs(x(4)) < minimumUpdateAngularThreshold
+               && fabs(x(5)) < minimumUpdateAngularThreshold
+               ){
+            break;
+          }
 				}
 				else {
 					puts("can not solve Ax = b");

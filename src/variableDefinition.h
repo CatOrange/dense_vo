@@ -62,11 +62,12 @@ const double validPixelPercentageThreshold = 0.5;
 #define DEBUG_DENSETRACKING
 //#define FRAME_TO_FRAME
 //#define ADD_VELOCITY_PRIOR
-const double graidientThreshold = 100.0;
-const double updateThreshold = 0.0005;
+const double graidientThreshold = 10.0;
+const double minimumUpdateTranslationThreshold = 0.01;
+const double minimumUpdateAngularThreshold = 0.5/180.0*PI ;
 const int maxIteration = 20 ;
 const int maxPyramidLevel = 1;
-const int minDenseTrackingNum = 100;
+const int minDenseTrackingNum = 8000;
 const double covRotationVel = 1.0 / 180.0 * PI ;
 const double weightRotationVel = 1.0 / covRotationVel*10 ;
 const double covLinearVel = 0.01 ;
