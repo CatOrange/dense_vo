@@ -29,7 +29,7 @@ using namespace cv;
 using namespace Eigen;
 const int numImage = 800;
 const int groundTruthDataNum = 5000;
-char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_far\\" ;
+char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_near\\" ;
 char depthDataPath[256] ;
 char rgbDataPath[256] ;
 char rgbListPath[256] ;

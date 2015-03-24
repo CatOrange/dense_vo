@@ -41,7 +41,7 @@ const int slidingWindowSize = 10;
 const double AverageIntensityError = 80.0;
 const double invIntensityCov = 1.0 / (3.0*3.0);
 const double dxOptProportion = 0.1;
-const int maxIterationBA = 3;
+const int maxIterationBA = 10;
 const int maxPyramidLevelBA = 1;
 const double normalizedParallaxThreshold = 10.0 / 535.0;
 const double angularThreshold = 3.0 / 180 * PI;
@@ -59,15 +59,15 @@ const double validPixelThreshold = 0.5;
 const double validPixelPercentageThreshold = 0.5;
 
 //for dense tracking
-#define DEBUG_DENSETRACKING
+//#define DEBUG_DENSETRACKING
 //#define FRAME_TO_FRAME
 //#define ADD_VELOCITY_PRIOR
 const double graidientThreshold = 10.0;
-const double minimumUpdateTranslationThreshold = 0.01;
+const double minimumUpdateTranslationThreshold = 0.005;
 const double minimumUpdateAngularThreshold = 0.5/180.0*PI ;
-const int maxIteration = 20 ;
-const int maxPyramidLevel = 1;
-const int minDenseTrackingNum = 8000;
+const int maxIteration = 5 ;
+const int maxPyramidLevel =  3;
+const int minDenseTrackingNum = 4800;
 const double covRotationVel = 1.0 / 180.0 * PI ;
 const double weightRotationVel = 1.0 / covRotationVel*10 ;
 const double covLinearVel = 0.01 ;
