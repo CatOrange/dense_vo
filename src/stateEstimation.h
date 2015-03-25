@@ -1050,15 +1050,17 @@ public:
 	{
 		Matrix3d skewW = vectorToSkewMatrix(w);
 
+		
 		double theta = sqrt(w.squaredNorm());
-
 		Matrix3d deltaR = Matrix3d::Identity() + (sin(theta) / theta)*skewW + ((1 - cos(theta)) / (theta*theta))*skewW*skewW;
 		Vector3d deltaT = (Matrix3d::Identity() + ((1 - cos(theta)) / (theta*theta)) *skewW + ((theta - sin(theta)) / (theta*theta*theta)*skewW*skewW)) * v;
+		
+
+		//Matrix3d deltaR = Matrix3d::Identity() + skewW ;
+		//Vector3d deltaT = v;
+
 		//Matrix3d newR = R*deltaR.transpose();
 		//Vector3d newT = -R*deltaR.transpose()*deltaT + T;
-
-		//    cout << "deltaR\n" << deltaR << endl ;
-		//    cout << "deltaT\n" << deltaT << endl ;
 
 		Matrix3d newR = R*deltaR;
 		Vector3d newT = R*deltaT + T;
@@ -1068,6 +1070,15 @@ public:
 
 		R = newR;
 		T = newT;
+	}
+
+	void updateR_T_withoutScaling(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w, Matrix3d& incR, Vector3d& incT)
+	{		
+		incR *= (Matrix3d::Identity() + vectorToSkewMatrix(w));
+		incT += v;
+
+		R *= (Matrix3d::Identity() + vectorToSkewMatrix(w)) ;
+		T += v;
 	}
 
 	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
@@ -1741,87 +1752,63 @@ public:
 					Vector3d p01 = p1 - p0;
 					MatrixXd normalT = p02.cross(p01).transpose();
 					MatrixXd numerotor = normalT*p0;
-					int actualNum = 0;
+
+					double up = iter->lambda[0] * iter->lambda[1] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
+						+ SQ(iter->lambda[0])*  iter->lambda[2] * iter->u0xu2_T_u0(0, 0)
+						+ SQ(iter->lambda[0])* iter->lambda[1] * iter->u0xu1_T_u0(0, 0);
+
+					MatrixXd u_e_List(3, sz);
+					MatrixXd piList(3, sz);
+					VectorXd down(sz);
+
+					for (int i = 0; i < sz; i++)
+					{
+						u_e_List(0, i) = currentSuperpixel.listOfV_[i];
+						u_e_List(1, i) = currentSuperpixel.listOfU_[i];
+						u_e_List(2, i) = 1.0;
+					}
+					MatrixXd denorminatorList_12 = iter->u1xu2_T*u_e_List;
+					MatrixXd denorminatorList_02 = iter->u0xu2_T*u_e_List;
+					MatrixXd denorminatorList_01 = iter->u0xu1_T*u_e_List;
 
 					for (int i = 0; i < sz; i++)//for every pixel within a superpixel
 					{
-						//int v = currentSuperpixel.listOfV[i];
-						//int u = currentSuperpixel.listOfU[i];
-						//double v_ = (coordinateX[level][v] - para->cx) / para->fx;
-						//double u_ = (coordinateY[level][u] -para->cy) / para->fy;
-						Vector3d u_e;
-						u_e << currentSuperpixel.listOfV_[i], currentSuperpixel.listOfU_[i], 1.0;
+						down(i) = iter->lambda[1] * iter->lambda[2] * denorminatorList_12(0, i)
+							+ iter->lambda[0] * iter->lambda[2] * denorminatorList_02(0, i)
+							+ iter->lambda[0] * iter->lambda[1] * denorminatorList_01(0, i);
 
-						MatrixXd denorminator = normalT*u_e;
-						double lambda = numerotor(0, 0) / denorminator(0, 0);
-						Vector3d pi = lambda * u_e;
-
-						double up = iter->lambda[0] * iter->lambda[1] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
-							+ SQ(iter->lambda[0])*  iter->lambda[2] * iter->u0xu2_T_u0(0, 0)
-							+ SQ(iter->lambda[0])* iter->lambda[1] * iter->u0xu1_T_u0(0, 0);
-
-						double down = iter->lambda[1] * iter->lambda[2] * (iter->u1xu2_T*u_e)(0, 0)
-							+ iter->lambda[0] * iter->lambda[2] * (iter->u0xu2_T*u_e)(0, 0)
-							+ iter->lambda[0] * iter->lambda[1] * (iter->u0xu1_T*u_e)(0, 0);
-
-						//Vector3d b = -iter->pk[0] * iter->lambda[0];
-						//Matrix3d A(3, 3);
-						//A.block(0, 0, 3, 1) = iter->pk[1] * iter->lambda[1] - iter->pk[0] * iter->lambda[0];
-						//A.block(0, 1, 3, 1) = iter->pk[2] * iter->lambda[2] - iter->pk[0] * iter->lambda[0];
-
-						//int v = currentSuperpixel.listOfV[i];
-						//int u = currentSuperpixel.listOfU[i];
-						//double v_ = (coordinateX[level][v] - para->cx) / para->fx;
-						//double u_ = (coordinateY[level][u] -para->cy) / para->fy;
-						//A.block(0, 2, 3, 1) << -v_, -u_, -1.0;
-						//Vector3d xx = A.householderQr().solve(b);
-						//Vector3d pi = xx(2)*(-A.block(0, 2, 3, 1));
-						//double A_ie = xx(0);
-						//double B_ie = xx(1);
-
-						//if (pi(2) < zeroThreshold){
-						//	continue;
-						//}
-
-						//for (int k = 0; k < sz; k++)
-						//{
-						//	int u = coordinateY[0][currentSuperPixel.listOfU[k]];
-						//	int v = coordinateX[0][currentSuperPixel.listOfV[k]];
-						//	double v_ = (v - para->cx) / para->fx;
-						//	double u_ = (u - para->cy) / para->fy;
-						//	A.block(0, 2, 3, 1) << -v_, -u_, -1.0;
-
-						//	Vector3d x = A.householderQr().solve(b);
-						//	//Vector3d x = (A.transpose()*A).inverse() * A.transpose() * b;
-						//	
-						//	currentSuperPixel.listOfA.push_back( x(0) );
-						//	currentSuperPixel.listOfB.push_back( x(1) );
-						//	currentSuperPixel.Intensity.push_back( current->intensity[0][ INDEX(u, v, height, width)]  ) ;
+						piList.block(0, i, 3, 1) = up / down(i) * u_e_List.block(0, i, 3, 1);
+					}
 
 #ifdef DEBUG_BA
-						double proportion = 0.3;
-						int u = int(pi(1)*para->fy[level] / pi(2) + para->cy[level] + 0.5);
-						int v = int(pi(0)*para->fx[level] / pi(2) + para->cx[level] + 0.5);
+					double proportion = 0.3;
+					int u = int(pi(1)*para->fy[level] / pi(2) + para->cy[level] + 0.5);
+					int v = int(pi(0)*para->fx[level] / pi(2) + para->cx[level] + 0.5);
 
-						if ( !(u < 0 || u >= n || v < 0 || v >= m) ){
-							currentImage.at<Vec3b>(u, v)[0] = currentImage.at<Vec3b>(u, v)[0] * proportion + colorR * (1 - proportion);
-							currentImage.at<Vec3b>(u, v)[1] = currentImage.at<Vec3b>(u, v)[1] * proportion + colorG * (1 - proportion);
-							currentImage.at<Vec3b>(u, v)[2] = currentImage.at<Vec3b>(u, v)[2] * proportion + colorB * (1 - proportion);
-						}
+					if ( !(u < 0 || u >= n || v < 0 || v >= m) ){
+						currentImage.at<Vec3b>(u, v)[0] = currentImage.at<Vec3b>(u, v)[0] * proportion + colorR * (1 - proportion);
+						currentImage.at<Vec3b>(u, v)[1] = currentImage.at<Vec3b>(u, v)[1] * proportion + colorG * (1 - proportion);
+						currentImage.at<Vec3b>(u, v)[2] = currentImage.at<Vec3b>(u, v)[2] * proportion + colorB * (1 - proportion);
+					}
 #endif
+					int actualNum = 0;
+					int reProjectListSz = iter->reprojectList.size();
+					//						omp_set_num_threads(ompNumThreads);
+					//#pragma omp parallel for
+					for (int j = 0; j < reProjectListSz; j++)
+					{
+						int linkStateID = iter->reprojectList[j];
+						unsigned char *nextIntensity = states[linkStateID].intensity[level];
+						double* nextGradientX = states[linkStateID].gradientX[level];
+						double* nextGradientY = states[linkStateID].gradientY[level];
 
-						int reProjectListSz = iter->reprojectList.size();
-
-						omp_set_num_threads(ompNumThreads);
-#pragma omp parallel for
-						for (int j = 0; j < reProjectListSz; j++)
+						MatrixXd Rji = R[linkStateID].transpose()*R[currentStateID];
+						Vector3d deltaT = R[linkStateID].transpose()*(T[currentStateID] - T[linkStateID]);
+						MatrixXd pjList = Rji * piList;
+						for (int i = 0; i < sz; i++)
 						{
-							int linkStateID = iter->reprojectList[j];
-							unsigned char *nextIntensity = states[linkStateID].intensity[level];
-							double* nextGradientX = states[linkStateID].gradientX[level];
-							double* nextGradientY = states[linkStateID].gradientY[level];
+							Vector3d pj = pjList.block(0, i, 3, 1) + deltaT;
 
-							Vector3d pj = R[linkStateID].transpose()*(T[currentStateID] - T[linkStateID] + R[currentStateID] * pi);
 							if (pj(2) < zeroThreshold){
 								continue;
 							}
@@ -1829,13 +1816,14 @@ public:
 							int u2 = int(pj(1)*para->fy[level] / pj(2) + para->cy[level] + 0.5);
 							int v2 = int(pj(0)*para->fx[level] / pj(2) + para->cx[level] + 0.5);
 
+							//TODO: Intepolation
 							if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
 								continue;
 							}
 
-							if (SQ(nextGradientX[INDEX(u2, v2, n, m)]) + SQ(nextGradientY[INDEX(u2, v2, n, m)]) < graidientThreshold){
-								continue;
-							}
+							//if (SQ(nextGradientX[INDEX(u2, v2, n, m)]) + SQ(nextGradientY[INDEX(u2, v2, n, m)]) < graidientThreshold){
+							//	continue;
+							//}
 
 #ifdef DEBUG_BA
 							reprojectImageSet[j].at<Vec3b>(u2, v2)[0] = reprojectImageSet[j].at<Vec3b>(u2, v2)[0] * proportion + colorR * (1 - proportion);
@@ -1862,167 +1850,79 @@ public:
 							MatrixXd twoByThree(2, 3);
 							twoByThree << para->fx[level] / pj(2), 0, -pj(0)*para->fx[level] / SQ(pj(2)), 0, para->fy[level] / pj(2), -pj(1)*para->fy[level] / SQ(pj(2));
 
-							MatrixXd oneByThree = oneByTwo*twoByThree;
-							MatrixXd threeByThree = oneByThree.transpose() * oneByThree;
-
-							MatrixXd tmpR = R[linkStateID].transpose()*R[currentStateID];
-							double tmpNumerator;
-							double tmpDenorminator = down*down;
-							int updatePos;
-
-							////////////////////////////////////OLD METHOD////////////////////////////////////
-							//HTH.setZero();
-							//HTb.setZero();
-							//MatrixXd HTH2 = HTH;
-							//VectorXd HTb2 = HTb;
-
-							/*
-							MatrixXd threeBySizeOfH = MatrixXd::Zero(3, sizeOfH);
-
+							MatrixXd threeByFifteen(3, 15);
 							//1. xi
-							updatePos = currentStateID * 6;
-							threeBySizeOfH.block(0, updatePos, 3, 3) += -R[linkStateID].transpose();
-							threeBySizeOfH.block(0, updatePos + 3, 3, 3) += -R[linkStateID].transpose()*R[currentStateID] * vectorToSkewMatrix(pi);
+							threeByFifteen.block(0, 0, 3, 3) = R[linkStateID].transpose();
+							threeByFifteen.block(0, 3, 3, 3) = -R[linkStateID].transpose()*R[currentStateID] * vectorToSkewMatrix( piList.block(0, i, 3, 1) );
 
 							//2. xj
-							updatePos = linkStateID * 6;
-							threeBySizeOfH.block(0, updatePos, 3, 3) += -R[linkStateID].transpose();
-							threeBySizeOfH.block(0, updatePos + 3, 3, 3) += vectorToSkewMatrix(pj);
+							threeByFifteen.block(0, 6, 3, 3) = -R[linkStateID].transpose();
+							threeByFifteen.block(0, 9, 3, 3) = vectorToSkewMatrix( pj );
 
-							//3. yi
-							updatePos = sizeOfH - 3 * (SuperpixelID + 1);
-							MatrixXd tmpR = R[linkStateID].transpose()*R[currentStateID];
+							//3. yk
 							double tmpNumerator;
-							double tmpDenorminator = down*down;
-
-							tmpNumerator = (
-							iter->lambda[1] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
-							+ 2.0*iter->lambda[0]*  iter->lambda[2] * iter->u0xu2_T_u0(0, 0)
-							+ 2.0*iter->lambda[0]* iter->lambda[1] * iter->u0xu1_T_u0(0, 0)
-							) * down
-							- (
-							+ iter->lambda[2] * (iter->u0xu2_T*u_e)(0, 0)
-							+ iter->lambda[1] * (iter->u0xu1_T*u_e)(0, 0)
-							)*up;
-							threeBySizeOfH.block(0, updatePos, 3, 1) += tmpNumerator / tmpDenorminator * (tmpR * iter->pk[0]);
-
-							tmpNumerator = (
-							iter->lambda[0] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
-							+ SQ(iter->lambda[0]) * iter->u0xu2_T_u0(0, 0)
-							) * down
-							- (
-							iter->lambda[2] * (iter->u1xu2_T*u_e)(0, 0)
-							+ iter->lambda[0] * (iter->u0xu2_T*u_e)(0, 0)
-							)*up;
-							threeBySizeOfH.block(0, updatePos + 1, 3, 1) += tmpNumerator / tmpDenorminator  * (tmpR * iter->pk[1]);
-
-							tmpNumerator = (
-							iter->lambda[0] * iter->lambda[1] * iter->u1xu2_T_u0(0, 0)
-							+ SQ(iter->lambda[0])* iter->u0xu2_T_u0(0, 0)
-							) * down
-							- (
-							iter->lambda[1] * (iter->u1xu2_T*u_e)(0, 0)
-							+ iter->lambda[0] * (iter->u0xu2_T*u_e)(0, 0)
-							)*up;
-							threeBySizeOfH.block(0, updatePos + 2, 3, 1) += tmpNumerator / tmpDenorminator * (tmpR * iter->pk[2]);
-
-							MatrixXd Hij = oneByThree*threeBySizeOfH;
-							HTH2 += w*Hij.transpose()*Hij;
-							HTb2 -= w*(r*Hij.transpose());
-							*/
-
-							////////////////////////////////////NEW METHOD////////////////////////////////////
-
-							//1. xi
-							MatrixXd threeBySix_xi(3, 6);
-							threeBySix_xi.block(0, 0, 3, 3) = -R[linkStateID].transpose();
-							threeBySix_xi.block(0, 3, 3, 3) = -R[linkStateID].transpose()*R[currentStateID] * vectorToSkewMatrix(pi);
-
-							//2. xj
-							MatrixXd threeBySix_xj(3, 6);
-							threeBySix_xj.block(0, 0, 3, 3) = -R[linkStateID].transpose();
-							threeBySix_xj.block(0, 3, 3, 3) = vectorToSkewMatrix(pj);
-
-							//3. yi
-							MatrixXd threeByThree_yi(3, 3);
+							Vector3d u_e_j = 1.0 / SQ(down(i)) * (Rji *u_e_List.block(0, i, 3, 1));
 							tmpNumerator = (
 								iter->lambda[1] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
 								+ 2.0*iter->lambda[0] * iter->lambda[2] * iter->u0xu2_T_u0(0, 0)
 								+ 2.0*iter->lambda[0] * iter->lambda[1] * iter->u0xu1_T_u0(0, 0)
-								) * down
-								- (
-								+iter->lambda[2] * (iter->u0xu2_T*u_e)(0, 0)
-								+ iter->lambda[1] * (iter->u0xu1_T*u_e)(0, 0)
+								) * down(i)
+								- ( iter->lambda[1] * (iter->u0xu1_T*u_e_List.block(0, i, 3, 1))(0, 0)
+								 - iter->lambda[2] * (iter->u0xu2_T*u_e_List.block(0, i, 3, 1) )(0, 0)
 								)*up;
-							threeByThree_yi.block(0, 0, 3, 1) = tmpNumerator / tmpDenorminator * (tmpR * iter->pk[0]);
+							threeByFifteen.block(0, 12, 3, 1) = tmpNumerator * u_e_j ;
 
 							tmpNumerator = (
 								iter->lambda[0] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
 								+ SQ(iter->lambda[0]) * iter->u0xu2_T_u0(0, 0)
-								) * down
+								) * down(i)
 								- (
-								iter->lambda[2] * (iter->u1xu2_T*u_e)(0, 0)
-								+ iter->lambda[0] * (iter->u0xu2_T*u_e)(0, 0)
+								iter->lambda[2] * (iter->u1xu2_T*u_e_List.block(0, i, 3, 1))(0, 0)
+								+ iter->lambda[0] * (iter->u0xu2_T*u_e_List.block(0, i, 3, 1))(0, 0)
 								)*up;
-							threeByThree_yi.block(0, 1, 3, 1) = tmpNumerator / tmpDenorminator  * (tmpR * iter->pk[1]);
+							threeByFifteen.block(0, 13, 3, 1) = tmpNumerator  * u_e_j ;
 
 							tmpNumerator = (
 								iter->lambda[0] * iter->lambda[1] * iter->u1xu2_T_u0(0, 0)
-								+ SQ(iter->lambda[0])* iter->u0xu2_T_u0(0, 0)
-								) * down
+								- SQ(iter->lambda[0])* iter->u0xu2_T_u0(0, 0)
+								) * down(i)
 								- (
-								iter->lambda[1] * (iter->u1xu2_T*u_e)(0, 0)
-								+ iter->lambda[0] * (iter->u0xu2_T*u_e)(0, 0)
+								iter->lambda[1] * (iter->u1xu2_T*u_e_List.block(0, i, 3, 1))(0, 0)
+								- iter->lambda[0] * (iter->u0xu2_T*u_e_List.block(0, i, 3, 1))(0, 0)
 								)*up;
-							threeByThree_yi.block(0, 2, 3, 1) = tmpNumerator / tmpDenorminator * (tmpR * iter->pk[2]);
+							threeByFifteen.block(0, 14, 3, 1) = tmpNumerator  * u_e_j ;
 
-							updatePos = sizeOfH - 3 * (SuperpixelID + 1);
-							//1. related to xi
-							MatrixXd threeBySix_xi_T = threeBySix_xi.transpose();
+							VectorXd oneByFifteen = oneByTwo*twoByThree*threeByFifteen;
+							VectorXd oneByFifteenT = oneByFifteen.transpose();
+							MatrixXd fifteenByFifteen = oneByFifteenT*oneByFifteen;
+						
+							int updatePos = sizeOfH - 3 * (SuperpixelID + 1);
+							
 #pragma omp critical
 							{
-								HTH.block(currentStateID * 6, currentStateID * 6, 6, 6) += w* threeBySix_xi_T * threeByThree * threeBySix_xi;
-								HTH.block(currentStateID * 6, linkStateID * 6, 6, 6) += w* threeBySix_xi_T * threeByThree * threeBySix_xj;
-								HTH.block(currentStateID * 6, updatePos, 6, 3) += w* threeBySix_xi_T * threeByThree * threeByThree_yi;
+								//1. related to xi
+								HTH.block(currentStateID * 6, currentStateID * 6, 6, 6) += w* fifteenByFifteen.block(0, 0, 6, 6);
+								HTH.block(currentStateID * 6, linkStateID * 6, 6, 6) += w* fifteenByFifteen.block(0, 6, 6, 6);
+								HTH.block(currentStateID * 6, updatePos, 6, 3) += w* fifteenByFifteen.block(0, 12, 6, 3);
+
+								//2. related to xj
+								HTH.block(linkStateID * 6, currentStateID * 6, 6, 6) += w* fifteenByFifteen.block(6, 0, 6, 6);
+								HTH.block(linkStateID * 6, linkStateID * 6, 6, 6) += w* fifteenByFifteen.block(6, 6, 6, 6);
+								HTH.block(linkStateID * 6, updatePos, 6, 3) += w* fifteenByFifteen.block(6, 12, 6, 3);
+
+								//3. related to yi
+								HTH.block(updatePos, currentStateID * 6, 3, 6) += w* fifteenByFifteen.block(12, 0, 3, 6);
+								HTH.block(updatePos, linkStateID * 6, 3, 6) += w* fifteenByFifteen.block(12, 6, 3, 6);
+								HTH.block(updatePos, updatePos, 3, 3) += w* fifteenByFifteen.block(12, 12, 3, 3);
+
+								//4. HTb
+								HTb.segment(currentStateID * 6, 6) -= w*r* oneByFifteenT.segment(0, 6);
+								HTb.segment(linkStateID * 6, 6) -= w*r* oneByFifteenT.segment(6, 6);
+								HTb.segment(updatePos, 3) -= w*r* oneByFifteenT.segment(12, 3);
 							}
 
-							//2. related to xj
-							MatrixXd threeBySix_xj_T = threeBySix_xj.transpose();
-#pragma omp critical
-							{
-								HTH.block(linkStateID * 6, currentStateID * 6, 6, 6) += w* threeBySix_xj_T * threeByThree * threeBySix_xi;
-								HTH.block(linkStateID * 6, linkStateID * 6, 6, 6) += w* threeBySix_xj_T * threeByThree * threeBySix_xj;
-								HTH.block(linkStateID * 6, updatePos, 6, 3) += w* threeBySix_xj_T * threeByThree * threeByThree_yi;
-							}
-
-							//3. related to yi
-							MatrixXd threeByThree_yi_T = threeByThree_yi.transpose();
-#pragma omp critical
-							{
-								HTH.block(updatePos, currentStateID * 6, 3, 6) += w* threeByThree_yi_T * threeByThree * threeBySix_xi;
-								HTH.block(updatePos, linkStateID * 6, 3, 6) += w* threeByThree_yi_T * threeByThree * threeBySix_xj;
-								HTH.block(updatePos, updatePos, 3, 3) += w* threeByThree_yi_T * threeByThree * threeByThree_yi;
-							}
-
-							//4. HTb
-#pragma omp critical
-							{
-								HTb.segment(currentStateID * 6, 6) -= w*r* (oneByThree*threeBySix_xi).transpose();
-								HTb.segment(linkStateID * 6, 6) -= w*r* (oneByThree*threeBySix_xj).transpose();
-								HTb.segment(updatePos, 3) -= w*r* (oneByThree*threeByThree_yi).transpose();
-							}
-
-							//MatrixXd HijT = Hij.transpose();
-							//HTH += w*(HijT*Hij);
-							//HTb -= w*(r*HijT);
-
-							//if ((HTH2 - HTH).norm() > zeroThreshold || (HTb2 - HTb).norm() > zeroThreshold){
-							//	cout << "HTH=" << (HTH2 - HTH).norm() << endl;
-							//	cout << "HTb=" << (HTb2 - HTb).norm() << endl;
-							//}
-
-						}//end of reprojection
-					}//end of pixel within a superpixel
+						}//end of pixel within a superpixel
+					}//end of reprojection
 
 					//cout << SuperpixelID << endl;
 					//cout << HTH << endl;
