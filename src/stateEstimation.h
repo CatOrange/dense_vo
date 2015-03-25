@@ -865,7 +865,7 @@ public:
 			tail -= slidingWindowSize;
 		}
 		STATE *current = &states[tail];
-		Mat currentDepthImage;
+    //Mat currentDepthImage;
 
 		//init the intensity and the depth value
 		int n = height;
@@ -911,6 +911,8 @@ public:
 					validNum++;
 				}
 			}
+      printf("dense tracking validNum: %d\n", validNum ) ;
+
 			sort(&gradientList[0], &gradientList[validNum]);
 
 			int bin[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };

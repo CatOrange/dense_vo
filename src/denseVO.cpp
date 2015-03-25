@@ -69,10 +69,8 @@ ros::Publisher pub_path ;
 ros::Publisher pub_odometry ;
 ros::Publisher pub_pose ;
 ros::Publisher pub_cloud ;
-image_transport::Publisher pub_grayImage ;
-image_transport::Publisher pub_depthImage ;
-image_transport::Subscriber sub_image;
-image_transport::Subscriber sub_depth;
+ros::Publisher pub_grayImage ;
+ros::Subscriber sub_image;
 visualization_msgs::Marker path_line;
 
 Mat rgbImage;
@@ -187,6 +185,13 @@ void pubPath(const Vector3d& p)
 
 void init()
 {
+    for ( int i = 0 ; i < maxPyramidLevel ; i++ ){
+        int height = IMAGE_HEIGHT >> i ;
+        int width = IMAGE_WIDTH >> i ;
+        grayImage[i] = Mat::zeros(height, width, CV_8U ) ;
+        depthImage[i] = Mat::zeros(height, width, CV_32F ) ;
+    }
+
     initCalibrationParameters() ;
     //cam.start();
 }
@@ -253,47 +258,31 @@ void estimateCurrentState()
 
 int rgbImageNum = 0 ;
 
-void rgbImageCallBack(const sensor_msgs::ImageConstPtr& msg)
+void imageCallBack(const sensor_msgs::ImageConstPtr& msg)
 {
-    //cout << "rgb: " << msg->header.stamp << endl ;
-    //cout << "rgbImageNum = " << rgbImageNum++ << endl ;
-    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::BGR8);
-    cvtColor(cv_ptr->image, grayImage[0], CV_BGR2GRAY);
+    //printf("%d\n", rgbImageNum++ ) ;
+    cv::Mat currentImage = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8)->image;
 
-    if ( depthImage[0].rows != grayImage[0].rows || depthImage[0].cols != grayImage[0].cols ){
-        return ;
+    const int h2 =  IMAGE_HEIGHT* 2 ;
+    for ( int i = 0 ; i < IMAGE_HEIGHT ; i++ )
+    {
+        for ( int j = 0 ; j < IMAGE_WIDTH ; j++ )
+        {
+            grayImage[0].at<unsigned char>(i, j) = currentImage.at<unsigned char>(i, j) ;
+            unsigned short high8 = currentImage.at<unsigned char>(i+IMAGE_HEIGHT, j) ;
+            unsigned short low8 = currentImage.at<unsigned char>(i+h2, j) ;
+            unsigned short tmp = ( high8 << 8 ) | low8 ;
+            depthImage[0].at<float>(i, j) = (float)tmp / 1000.0 ;
+        }
     }
 
-    //grayImage
-//#ifdef DOWNSAMPLING
-//    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
-//#endif
+//    imshow("grayImage", grayImage[0]) ;
+//    waitKey(1) ;
 
-    for (int kk = 1; kk < maxPyramidLevel; kk++){
-        pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
-    }
-
-//#ifdef DOWNSAMPLING
-//    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
-//#endif
-
-    for (int kk = 1; kk < maxPyramidLevel; kk++){
-        pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
-    }
-
-    estimateCurrentState() ;
-}
-
-
-void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
-{
-    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8);
-    grayImage[0] = cv_ptr->image.clone() ;
-
-    if ( depthImage[0].rows != grayImage[0].rows || depthImage[0].cols != grayImage[0].cols ){
-        return ;
-    }
-    depthImage[0] /= 1000;
+//    if ( depthImage[0].rows != grayImage[0].rows || depthImage[0].cols != grayImage[0].cols ){
+//        return ;
+//    }
+//    depthImage[0] /= 1000;
 
 //    printf("%d %d %d %d %d\n", grayImage[0].at<uchar>(160, 120), grayImage[0].at<uchar>(10, 10),
 //            grayImage[0].at<uchar>(310, 230), grayImage[0].at<uchar>(0, 230), grayImage[0].at<uchar>(310, 10) ) ;
@@ -320,15 +309,10 @@ void grayImageCallBack(const sensor_msgs::ImageConstPtr& msg)
         pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
     }
 
+    double t = (double)cvGetTickCount();
     estimateCurrentState() ;
-}
-
-void depthImageCallBack(const sensor_msgs::ImageConstPtr& msg)
-{
-    //cout << "depth: " << msg->header.stamp << endl ;
-    cv_bridge::CvImageConstPtr cv_ptr = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::TYPE_32FC1 );
-    //cv_ptr->image.convertTo(depthImage[0], CV_32F );
-    depthImage[0] = cv_ptr->image.clone() ;
+    t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
+    printf("dense tracking time: %f\n", t);
 }
 
 void fun()
@@ -355,8 +339,7 @@ void fun()
 
         estimateCurrentState() ;
 
-        //sensor_msgs::ImagePtr msg = cv_bridge::CvImage(std_msgs::Header(), "mono8", grayImage[0]).toImageMsg() ;
-        //pub_grayImage.publish( msg ) ;
+
 
         //ros::spinOnce();
         //loop_rate.sleep();
@@ -369,14 +352,14 @@ int main(int argc, char** argv )
     ros::init(argc, argv, "denseVO") ;
     ros::NodeHandle n ;
     //ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug);
-    image_transport::ImageTransport it(n) ;
 
-    //sub_image = it.subscribe("camera/grayImage", 20, &grayImageCallBack);
+    sub_image = n.subscribe("camera/grayAndDepthImage", 100, &imageCallBack);
     //sub_depth = it.subscribe("/camera/depthImage", 20, &depthImageCallBack);
 
     //sub_image = it.subscribe("/camera/rgb/image_color", 100, &rgbImageCallBack);
     //sub_depth = it.subscribe("/camera/depth/image", 100, &depthImageCallBack);
 
+    //pub_grayImage = n.advertise<sensor_msgs::Image>("camera/grayImage", 10 ) ;
     pub_path = n.advertise<visualization_msgs::Marker>("/denseVO/path", 1000);;
     pub_odometry = n.advertise<nav_msgs::Odometry>("/denseVO/odometry", 1000);;
     pub_pose = n.advertise<geometry_msgs::PoseStamped>("/denseVO/pose", 1000);
@@ -398,8 +381,7 @@ int main(int argc, char** argv )
     path_line.points.push_back( geometry_msgs::Point());
     pub_path.publish(path_line);
 
-    pub_grayImage = it.advertise("camera/grayImage", 10 ) ;
-    fun() ;
+    //fun() ;
 
     ros::spin();
 
