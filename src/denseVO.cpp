@@ -52,6 +52,10 @@
 //for sensor driver
 #include "PrimeSenseCam.h"
 
+//for multithread
+//#include <boost/thread.hpp>
+//boost::mutex mtx;
+
 using namespace std;
 using namespace cv;
 using namespace Eigen;
@@ -73,13 +77,15 @@ ros::Publisher pub_grayImage ;
 ros::Subscriber sub_image;
 visualization_msgs::Marker path_line;
 
-Mat rgbImage;
-Mat depthImage[maxPyramidLevel];
-Mat grayImage[maxPyramidLevel];
+Mat depthImage[maxPyramidLevel*bufferSize];
+Mat grayImage[maxPyramidLevel*bufferSize];
 STATE tmpState;
 STATE* lastFrame;
 
 bool vst = false;
+int rgbImageNum = 0 ;
+int bufferHead = 0;
+int bufferTail = 0 ;
 Matrix3d R_k_c;//R_k^(k+1)
 Matrix3d R_c_0;
 Vector3d T_k_c;//T_k^(k+1)
@@ -104,16 +110,16 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
     Matrix3d nextR = Matrix3d::Identity();
     Vector3d nextT = Vector3d::Zero();
-    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT);
+    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, bufferHead, nextR, nextT);
 
     T_k_c = nextR * T_k_c + nextT;
     R_k_c = nextR * R_k_c;
 }
 
-void keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
+void keyframeToFrameDenseTracking(int bufferHead, Matrix3d& R_k_c, Vector3d& T_k_c )
 {
     STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
+    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, bufferHead, R_k_c, T_k_c);
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -185,13 +191,17 @@ void pubPath(const Vector3d& p)
 
 void init()
 {
-    for ( int i = 0 ; i < maxPyramidLevel ; i++ ){
-        int height = IMAGE_HEIGHT >> i ;
-        int width = IMAGE_WIDTH >> i ;
-        grayImage[i] = Mat::zeros(height, width, CV_8U ) ;
-        depthImage[i] = Mat::zeros(height, width, CV_32F ) ;
+    for ( int j = 0 ; j < bufferSize ; j++ )
+    {
+        int k = j*maxPyramidLevel ;
+        for ( int i = 0 ; i < maxPyramidLevel ; i++ )
+        {
+            int height = IMAGE_HEIGHT >> i ;
+            int width = IMAGE_WIDTH >> i ;
+            grayImage[k+i] = Mat::zeros(height, width, CV_8U ) ;
+            depthImage[k+i] = Mat::zeros(height, width, CV_32F ) ;
+        }
     }
-
     initCalibrationParameters() ;
     //cam.start();
 }
@@ -200,79 +210,96 @@ int cnt = 0;
 
 void estimateCurrentState()
 {
-    cnt++ ;
-    if (vst == false )//the first frame
+    for ( int bufferLength = ( bufferTail - bufferHead + bufferSize ) % bufferSize ; bufferLength > 0 ; bufferLength-- )
     {
-        vst = true;
 
-        slidingWindows.insertKeyFrame(grayImage, depthImage, Matrix3d::Identity(), Vector3d::Zero() );
-        //slidingWindows.planeDection();
+        cnt++ ;
+        //double t = (double)cvGetTickCount();
 
-        R_k_c = Matrix3d::Identity();
-        T_k_c = Vector3d::Zero();
+        if (vst == false )//the first frame
+        {
+            vst = true;
 
-        lastFrame = &slidingWindows.states[slidingWindows.tail];
-        cnt = 1 ;
-        return ;
-    }
+            slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero() );
+            //slidingWindows.planeDection();
 
-#ifdef FRAME_TO_FRAME
-    frameToFrameDenseTracking(R_k_c, T_k_c);
-#else
-    keyframeToFrameDenseTracking(R_k_c, T_k_c );
-#endif
+            R_k_c = Matrix3d::Identity();
+            T_k_c = Vector3d::Zero();
 
-    R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
-    T_c_0 = R_c_0*(
-                R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
+            lastFrame = &slidingWindows.states[slidingWindows.tail];
 
-    pubOdometry(T_c_0, R_c_0);
-    pubPath(T_c_0);
+            bufferHead++ ;
+            if ( bufferHead >= bufferSize ){
+                bufferHead -= bufferSize ;
+            }
 
-    //cv::Mat falseColorsMap;
-    //applyColorMap(residualImage, falseColorsMap, cv::COLORMAP_RAINBOW );
+            continue ;
+        }
 
-    //cv::imshow("Resid", falseColorsMap);
-    //cv::waitKey(10) ;
+    #ifdef FRAME_TO_FRAME
+        frameToFrameDenseTracking(R_k_c, T_k_c);
+    #else
+        keyframeToFrameDenseTracking( bufferHead, R_k_c, T_k_c );
+    #endif
 
-    if ((cnt % 5) == 1)
-    {
-        slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
+        R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
+        T_c_0 = R_c_0*(
+                    R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
 
-        //pubOdometry(T_c_0, R_c_0);
-        //pubPath(T_c_0);
-        cout << cnt/10 << "-" << "currentPosition:\n" << T_c_0.transpose() << endl;
+        pubOdometry(T_c_0, R_c_0);
+        pubPath(T_c_0);
 
-        R_k_c = Matrix3d::Identity();
-        T_k_c = Vector3d::Zero();
-        lastFrame = &slidingWindows.states[slidingWindows.tail];
-    }
-    else
-    {
-#ifdef FRAME_TO_FRAME
-        lastFrame = &tmpState;
-        tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
-#endif
+        //cv::Mat falseColorsMap;
+        //applyColorMap(residualImage, falseColorsMap, cv::COLORMAP_RAINBOW );
+
+        //cv::imshow("Resid", falseColorsMap);
+        //cv::waitKey(10) ;
+
+        if ((cnt % keyFrameInterval) == 1)
+        {
+            slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, R_c_0, T_c_0 );
+
+            //pubOdometry(T_c_0, R_c_0);
+            //pubPath(T_c_0);
+            cout << cnt/keyFrameInterval << "-" << "currentPosition:\n" << T_c_0.transpose() << endl;
+
+            R_k_c = Matrix3d::Identity();
+            T_k_c = Vector3d::Zero();
+            lastFrame = &slidingWindows.states[slidingWindows.tail];
+        }
+        else
+        {
+    #ifdef FRAME_TO_FRAME
+            lastFrame = &tmpState;
+            tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
+    #endif
+        }
+
+        //printf("dense tracking time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
+
+        bufferHead++ ;
+        if ( bufferHead >= bufferSize ){
+            bufferHead -= bufferSize ;
+        }
     }
 }
-
-int rgbImageNum = 0 ;
 
 void imageCallBack(const sensor_msgs::ImageConstPtr& msg)
 {
     //printf("%d\n", rgbImageNum++ ) ;
     cv::Mat currentImage = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8)->image;
 
+    int startIndex = bufferTail * maxPyramidLevel ;
     const int h2 =  IMAGE_HEIGHT* 2 ;
     for ( int i = 0 ; i < IMAGE_HEIGHT ; i++ )
     {
         for ( int j = 0 ; j < IMAGE_WIDTH ; j++ )
         {
-            grayImage[0].at<unsigned char>(i, j) = currentImage.at<unsigned char>(i, j) ;
+            grayImage[startIndex+0].at<unsigned char>(i, j) = currentImage.at<unsigned char>(i, j) ;
             unsigned short high8 = currentImage.at<unsigned char>(i+IMAGE_HEIGHT, j) ;
             unsigned short low8 = currentImage.at<unsigned char>(i+h2, j) ;
             unsigned short tmp = ( high8 << 8 ) | low8 ;
-            depthImage[0].at<float>(i, j) = (float)tmp / 1000.0 ;
+            depthImage[startIndex+0].at<float>(i, j) = (float)tmp / 1000.0 ;
         }
     }
 
@@ -294,27 +321,25 @@ void imageCallBack(const sensor_msgs::ImageConstPtr& msg)
 //    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
 //#endif
 
-    for (int kk = 1; kk < maxPyramidLevel; kk++){
-        pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
-    }
-
     //depthImage[0].convertTo(depthImage[0], CV_32F );
-
 
 //#ifdef DOWNSAMPLING
 //    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
 //#endif
 
+
     for (int kk = 1; kk < maxPyramidLevel; kk++){
-        pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
+        pyrDownMeanSmooth<uchar>(grayImage[startIndex + kk - 1], grayImage[startIndex + kk]);
+        pyrDownMedianSmooth<float>(depthImage[startIndex + kk - 1], depthImage[startIndex + kk ]);
     }
 
-    double t = (double)cvGetTickCount();
-    estimateCurrentState() ;
-    t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
-    printf("dense tracking time: %f\n", t);
+    bufferTail++ ;
+    if ( bufferTail >= bufferSize ){
+        bufferTail -= bufferSize ;
+    }
 }
 
+/*
 void fun()
 {
     cv::Mat rgbImage ;
@@ -338,13 +363,9 @@ void fun()
         }
 
         estimateCurrentState() ;
-
-
-
-        //ros::spinOnce();
-        //loop_rate.sleep();
     }
 }
+*/
 
 int main(int argc, char** argv )
 {
@@ -353,7 +374,7 @@ int main(int argc, char** argv )
     ros::NodeHandle n ;
     //ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug);
 
-    sub_image = n.subscribe("camera/grayAndDepthImage", 100, &imageCallBack);
+    sub_image = n.subscribe("camera/grayAndDepthImage", 10, &imageCallBack);
     //sub_depth = it.subscribe("/camera/depthImage", 20, &depthImageCallBack);
 
     //sub_image = it.subscribe("/camera/rgb/image_color", 100, &rgbImageCallBack);
@@ -383,7 +404,15 @@ int main(int argc, char** argv )
 
     //fun() ;
 
-    ros::spin();
+    ros::Rate loop_rate(200.0);
+    bufferHead = bufferTail = 0 ;
+    while( n.ok() )
+    {
+        loop_rate.sleep() ;
+        ros::spinOnce() ;
+        //TODO
+        estimateCurrentState() ;
+    }
 
     return 0;
 }

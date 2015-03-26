@@ -62,12 +62,13 @@ const double validPixelPercentageThreshold = 0.5;
 //#define DEBUG_DENSETRACKING
 //#define FRAME_TO_FRAME
 //#define ADD_VELOCITY_PRIOR
+const int keyFrameInterval = 10 ;
 const double graidientThreshold = 10.0;
 const double minimumUpdateTranslationThreshold = 0.005;
 const double minimumUpdateAngularThreshold = 0.5/180.0*PI ;
 const int maxIteration = 5 ;
-const int maxPyramidLevel =  3;
-const int minDenseTrackingNum = 24000 ;
+const int maxPyramidLevel = 3 ;
+const int minDenseTrackingNum = 32000 ;
 const double covRotationVel = 1.0 / 180.0 * PI ;
 const double weightRotationVel = 1.0 / covRotationVel*10 ;
 const double covLinearVel = 0.01 ;
@@ -96,4 +97,9 @@ const int DISPLAY_NUM = 50;
 for openmp
 */
 const int ompNumThreads = 2;
+
+/*
+for ros
+*/
+const int bufferSize = 10 ;
 #endif

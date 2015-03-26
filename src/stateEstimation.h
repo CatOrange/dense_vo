@@ -339,7 +339,7 @@ public:
 		//		
 	}
 
-	void computeGradientMap(const Mat grayImage[maxPyramidLevel])
+  void computeGradientMap()
 	{
 		int height = IMAGE_HEIGHT;
 		int width = IMAGE_WIDTH;
@@ -853,7 +853,8 @@ public:
 		}
 	}
 
-	void insertKeyFrame(const Mat grayImage[maxPyramidLevel], const Mat depthImage[maxPyramidLevel], const Matrix3d& R, const Vector3d& T)
+  void insertKeyFrame(const Mat grayImage[maxPyramidLevel*bufferSize], const Mat depthImage[maxPyramidLevel*bufferSize],
+        int bufferHead, const Matrix3d& R, const Vector3d& T)
 	{
 		if (numOfState == slidingWindowSize){
 			//puts("pop state");
@@ -870,16 +871,17 @@ public:
 		//init the intensity and the depth value
 		int n = height;
 		int m = width;
+    int currentIndex = maxPyramidLevel* bufferHead ;
 		for (int i = 0; i < maxPyramidLevel; i++)
 		{
-			memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
-			memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
+      memcpy(current->intensity[i], (unsigned char*)grayImage[currentIndex+i].data, n*m*sizeof(unsigned char));
+      memcpy(current->depthImage[i], (float*)depthImage[currentIndex+i].data, n*m*sizeof(float));
 			n >>= 1;
 			m >>= 1;
 		}
 
 		//init the graident map
-		current->computeGradientMap(grayImage);
+    current->computeGradientMap();
 
 		//init the pixel info in a frame
 		for (int level = maxPyramidLevel - 1; level >= 0; level--)
@@ -1083,7 +1085,7 @@ public:
 		T += v;
 	}
 
-	void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
+  void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel*bufferSize], int bufferHead, Matrix3d& R, Vector3d& T)
 	{
 		//no assumption on angular and linear velocity
 		Matrix3d tmpR = R;
@@ -1099,7 +1101,7 @@ public:
 		{
 			int n = height >> level;
 			int m = width >> level;
-			unsigned char *nextIntensity = (unsigned char*)grayImage[level].data;
+      unsigned char *nextIntensity = (unsigned char*)grayImage[bufferHead*maxPyramidLevel+level].data;
 			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 			double lastError = 100000000000.0;
 			last_delta_v.Zero();
@@ -1277,6 +1279,8 @@ public:
 					updateR_T(tmpR, tmpT, v, w, incR, incT);
 					last_delta_v = v;
 					last_delta_w = w;
+
+          //cout << tmpT.transpose() << endl ;
 
 					//#ifdef DEBUG_DENSETRACKING
 					//					printf("ith=%d num=%d norm=%f error=%f\n", ith, actualNum, x.norm(), currentError);
