@@ -72,6 +72,7 @@ const int minDenseTrackingNum = 32000 ;
 const double covRotationVel = 1.0 / 180.0 * PI ;
 const double weightRotationVel = 1.0 / covRotationVel*10 ;
 const double covLinearVel = 0.01 ;
+
 const double weightLinearVel = 1.0 / covLinearVel*10 ;
 
 //For reprojection
