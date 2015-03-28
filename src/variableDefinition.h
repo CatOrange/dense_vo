@@ -36,7 +36,7 @@ const double cosThreshold = cos(10.0 / 180 * PI);
 //#define DEBUG_INSERT_SUPERPIXEL
 
 //for BA
-//#define DEBUG_BA
+#define DEBUG_BA
 const int slidingWindowSize = 10;
 const double AverageIntensityError = 80.0;
 const double invIntensityCov = 1.0 / (3.0*3.0);
@@ -84,14 +84,14 @@ const int minOptNum = 100 * (1 << (maxPyramidLevelBA - 1) * 2);
 for plane extraction - AHC
 */
 //#define DEBUG_CLUSTRING
-const int winH = 4;
-const int winW = 4;
+const int winH = 2;
+const int winW = 2;
 const double depthFactor = 5000.0;
 const double alpha = 0.015;
 const double sigma = 1.6;
 const double eps = 5;
-const int T_NUM = 20000 ;
-const int minimumPixelsInASuperpixel = minOptNum;
+const int T_NUM = 5000 ;
+const int minimumPixelsInASuperpixel = 100;
 const int DISPLAY_NUM = 50;
 
 /*

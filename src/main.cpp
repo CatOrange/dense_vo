@@ -621,8 +621,7 @@ int main()
 
 			//cout << firstFrameTtoVICON << endl;
 			slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero());
-
-			//slidingWindows.planeDection();
+			slidingWindows.planeDection();
 
 			R_k_c = Matrix3d::Identity();
 			T_k_c = Vector3d::Zero();
@@ -679,12 +678,12 @@ int main()
 				<< slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
 
 
-			//slidingWindows.PhotometricBA();
+			slidingWindows.PhotometricBA();
 
 			//t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
 			//printf("BA cal time: %f\n", t);
 
-			//slidingWindows.planeDection();
+			slidingWindows.planeDection();
 
 			R_k_c = Matrix3d::Identity();
 			T_k_c = Vector3d::Zero();

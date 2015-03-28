@@ -154,6 +154,8 @@ public:
 		//node graph initialization
 		myHeap.clear();
 
+		//printf("[DAHC] fx=%f fy=%f cx=%f cy=%f\n", fx, fy, cx, cy);
+
 		int numCount = 0;
 		//int numInCol = (width + winW - 1) / winW;
 		//int neighborNumDifferences[4];
@@ -161,6 +163,8 @@ public:
 		//neighborNumDifferences[1] = numInCol;//down
 		//neighborNumDifferences[0] = -1;//left
 		//neighborNumDifferences[0] = 1;//right
+
+		//printf("height=%d width=%d\n", height, width);
 
 		for (int i = 0; i < height; i += winH)
 		{
@@ -188,27 +192,27 @@ public:
 					{
 						//1. missing data
 						float  tmpD = depth[u*width + v];
-						if (tmpD < zeroThreshold || mask[INDEX(u, v, height, width)] == false ) {
+						if (tmpD < zeroThreshold  || mask[INDEX(u, v, height, width)] == false ) {
 							flag = false;
 							break;
 						}
 
-						//2. depth discontinuity
-						for (int k = 0; k < 4; k++)
-						{
-							int tu = u + dy[k];
-							int tv = v + dx[k];
-							if (tu < 0 || tu >= height || tv < 0 || tv >= width){
-								continue;
-							}
-							//bool output = rejectNodeByDepthDiscontinuity(double(tmpD), double(depth[tu*width + tv]));
-							//flag &= !output;
-						}
-						if (flag == false) {
-							break;
-						}
+						////2. depth discontinuity
+						//for (int k = 0; k < 4; k++)
+						//{
+						//	int tu = u + dy[k];
+						//	int tv = v + dx[k];
+						//	if (tu < 0 || tu >= height || tv < 0 || tv >= width){
+						//		continue;
+						//	}
+						//	//bool output = rejectNodeByDepthDiscontinuity(double(tmpD), double(depth[tu*width + tv]));
+						//	//flag &= !output;
+						//}
+						//if (flag == false) {
+						//	break;
+						//}
 
-						double Z = tmpD / depthFactor;
+						double Z = tmpD ;
 						double X = (v - cx) * Z / fx;
 						double Y = (u - cy) * Z / fy;
 
@@ -226,7 +230,6 @@ public:
 						break;
 					}
 				}
-				numCount++;
 
 				tmp.valid = flag;
 				if (flag == false){
@@ -250,23 +253,31 @@ public:
 						tt.MSE = tmp.MSE;
 						tt.id = tmp.id;
 						myHeap.push(tt);
+						tmp.valid = true;
 					}
 				}
 
-				//4. check normal
-				double x = tmp.sumX / tmp.num;
-				double y = tmp.sumY / tmp.num;
-				double z = tmp.sumZ / tmp.num;
-				if (tmp.normal[0] * x + tmp.normal[1] * y + tmp.normal[2] * z >0){
-					//puts("found!!!");
-					tmp.normal[0] = -tmp.normal[0];
-					tmp.normal[1] = -tmp.normal[1];
-					tmp.normal[2] = -tmp.normal[2];
+				if (tmp.valid == true)
+				{
+					numCount++;
+
+					//4. check normal
+					double x = tmp.sumX / tmp.num;
+					double y = tmp.sumY / tmp.num;
+					double z = tmp.sumZ / tmp.num;
+					if (tmp.normal[0] * x + tmp.normal[1] * y + tmp.normal[2] * z >0){
+						//puts("found!!!");
+						tmp.normal[0] = -tmp.normal[0];
+						tmp.normal[1] = -tmp.normal[1];
+						tmp.normal[2] = -tmp.normal[2];
+					}
 				}
 			}
 		}
 		totalNumNodes = numCount;
 		mySet.unionSetInit(totalNumNodes + 5);
+
+		//printf("totalNum:%d\n", totalNumNodes);
 
 		//initial edge
 		int n = (height + winH - 1) / winH;
@@ -333,6 +344,8 @@ public:
 				}
 			}
 		}
+		//printf("[DAHC] cnt = %d\n", cnt);
+
 		sort(nodeList.begin(), nodeList.begin() + cnt);
 
 		seedsNum = min(K, cnt);
@@ -414,6 +427,7 @@ public:
 	void standardClustering()
 	{
 		seedsNum = 0;
+		//printf("heapSize = %d\n", myHeap.size);
 		while (myHeap.size > 0)
 		{
 			HEAPNODE current = myHeap.data[1];
@@ -452,7 +466,8 @@ public:
 				tmp.sumYZ = nodeMap[currentParent].sumYZ + nodeMap[kParent].sumYZ;
 				tmp.num = nodeMap[currentParent].num + nodeMap[kParent].num;
 
-				if (calculateNormal(tmp)) {
+				if (calculateNormal(tmp)) 
+				{
 					if (tmp.MSE < minMSE){
 						minIndex = kParent;
 						minMSE = tmp.MSE;
@@ -465,6 +480,7 @@ public:
 			//printf("DEBUG: minMSE: %f     T_MSE: %f	num:%d\n", minMSE, T_MSE );
 			if (minMSE > T_MSE)//Merge fail
 			{
+				//printf("[DAHC] minMSE:%f	T_MSE:%f\n", minMSE, T_MSE);
 				;
 			}
 			else//Merge succeed
