@@ -39,9 +39,7 @@ char depthFileNameList[numImage][128];
 char rgbFileNameList[numImage][128];
 unsigned long long rgbImageTimeStamp[numImage];
 unsigned long long depthImageTimeStamp[numImage];
-CAMER_PARAMETERS cameraParameters(535.4, 539.2, 320.1, 247.6);//TUM Freiburg 3 sequences
-//CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6,	255.3,	0.2624, -0.9531, -0.0054, 0.0026, 1.1633);
-//CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6, 255.3);//TUM Freiburg 1 sequences
+CAMER_PARAMETERS cameraParameters;
 STATEESTIMATION slidingWindows(IMAGE_HEIGHT, IMAGE_WIDTH, &cameraParameters);
 Matrix3d firstFrameRtoVICON;
 Vector3d firstFrameTtoVICON;
@@ -319,6 +317,24 @@ inline unsigned long long absUnsignedLongLong(unsigned long long a, unsigned lon
 void init()
 {
 	InitFIleList();
+
+	//TUM Freiburg 1 sequences
+	//CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6, 255.3);
+
+	//TUM Freiburg 3 sequences
+	double fx = 535.4;
+	double fy = 539.2;
+	double cx = 320.1;
+	double cy = 247.6;
+
+#ifdef DOWNSAMPLING
+	fx /= 2.0;
+	fy /= 2.0;
+	cx = (cx + 0.5) / 2.0 - 0.5;
+	cy = (cy + 0.5) / 2.0 - 0.5;
+#endif
+
+	cameraParameters.setParameters(fx, fy, cx, cy);
 }
 
 void updateR_T(Vector3d& w, Vector3d& v)
@@ -369,8 +385,9 @@ void updateR_T(Vector3d& w, Vector3d& v)
 
 //testDataGenerator TDG;
 Mat rgbImage;
-Mat depthImage[maxPyramidLevel];
-Mat grayImage[maxPyramidLevel];
+Mat depthImage[maxPyramidLevel*bufferSize];
+Mat grayImage[maxPyramidLevel*bufferSize];
+int bufferHead = 0;
 STATE tmpState;
 STATE* lastFrame;
 
@@ -378,26 +395,16 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
 	Matrix3d nextR = Matrix3d::Identity();
 	Vector3d nextT = Vector3d::Zero();
-	slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT);
+	slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, bufferHead, nextR, nextT);
 
 	T_k_c = nextR * T_k_c + nextT;
 	R_k_c = nextR * R_k_c;
 }
 
-void keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
+void keyframeToFrameDenseTracking(int bufferHead, Matrix3d& R_k_c, Vector3d& T_k_c)
 {
 	STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-
-	Matrix3d tmpR = R_k_c;
-	Vector3d tmpT = T_k_c;
-
-	slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c );
-
-	slidingWindows.last_delta_R = R_k_c * tmpR.transpose();
-	slidingWindows.last_delta_T = T_k_c - slidingWindows.last_delta_R* tmpT;
-
-	//cout << slidingWindows.last_delta_R << endl;
-	//cout << slidingWindows.last_delta_T.transpose() << endl;
+	slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, bufferHead, R_k_c, T_k_c);
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -515,6 +522,7 @@ int main()
 	ofstream fileOutput("result.txt");
 	
 	init();
+	bufferHead = 0;
 	for ( int i = 1; i < numImage; i += 1 )
 	{
 		printf("id : %d\n", i);
@@ -524,26 +532,8 @@ int main()
 		strcpy(tmp, rgbDataPath);
 		strcat(tmp, rgbFileNameList[i]);
 		rgbImage = imread(tmp, CV_LOAD_IMAGE_COLOR);
-		
-		Mat rgbRectImage;
-
-		//cv::undistort(rgbImage, rgbRectImage, cameraParameters.cameraMatrix, cameraParameters.distCoeffs);
-
-		//imshow("rgbImge", rgbImage ) ;
-		//imshow("rgbRectImage", rgbRectImage);
-		//waitKey(0);
-
 		cvtColor(rgbImage, grayImage[0], CV_BGR2GRAY);
-
-#ifdef DOWNSAMPLING
-		pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
-		//pyrDown(grayImage[0], grayImage[0]);//down-sampling
-#endif
-
-		for (int kk = 1; kk < maxPyramidLevel; kk++){
-			pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
-			//pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
-		}
+		//cv::undistort(rgbImage, rgbRectImage, cameraParameters.cameraMatrix, cameraParameters.distCoeffs);
 
 		//read depth image
 		strcpy(tmp, depthDataPath);
@@ -556,30 +546,30 @@ int main()
 			k = i;
 			minS = absUnsignedLongLong(depthImageTimeStamp[i], rgbImageTimeStamp[i]);
 		}
-		if (i + 1 < numImage && absUnsignedLongLong(depthImageTimeStamp[i+1], rgbImageTimeStamp[i]) < minS ){
+		if (i + 1 < numImage && absUnsignedLongLong(depthImageTimeStamp[i + 1], rgbImageTimeStamp[i]) < minS){
 			k = i + 1;
 		}
 		strcat(tmp, depthFileNameList[k]);
 		depthImage[0] = imread(tmp, CV_LOAD_IMAGE_ANYDEPTH | CV_LOAD_IMAGE_ANYCOLOR);
 
-		depthImage[0].convertTo(depthImage[0], CV_32F  );
+		depthImage[0].convertTo(depthImage[0], CV_32F);
 		depthImage[0] /= depthFactor;
 
-		//cv::undistort(depthImage, depthImage, cameraParameters.cameraMatrix, cameraParameters.distCoeffs);
+
+		//imshow("rgbImge", rgbImage ) ;
+		//imshow("rgbRectImage", rgbRectImage);
+		//waitKey(0);
+
 
 #ifdef DOWNSAMPLING
+		pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
 		pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
-		//pyrDown(depthImage, depthImage ) ;
 #endif
 
 		for (int kk = 1; kk < maxPyramidLevel; kk++){
+			pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
 			pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
-			//pyrDown(grayImage[kk-1], grayImage[kk]);//down-sampling
 		}
-
-		//imshow("rgb original", rgbImage);
-		//imshow("gray original", grayImage[0] );
-		//imshow("depth orginal", depthImage*depthFactor/62580 );
 
 
 		//for (int x = 20; x < 30; x++){
@@ -630,9 +620,8 @@ int main()
 			firstFrameTtoVICON << groundTruth[timeID].tx, groundTruth[timeID].ty, groundTruth[timeID].tz;
 
 			//cout << firstFrameTtoVICON << endl;
-			slidingWindows.insertKeyFrame(grayImage, depthImage, Matrix3d::Identity(), Vector3d::Zero() );
-
-			//slidingWindows.planeDection();
+			slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero());
+			slidingWindows.planeDection();
 
 			R_k_c = Matrix3d::Identity();
 			T_k_c = Vector3d::Zero();
@@ -653,7 +642,7 @@ int main()
 #ifdef FRAME_TO_FRAME
 		frameToFrameDenseTracking(R_k_c, T_k_c);
 #else
-		keyframeToFrameDenseTracking(R_k_c, T_k_c );
+		keyframeToFrameDenseTracking(bufferHead, R_k_c, T_k_c);
 #endif
 
 		//t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
@@ -683,18 +672,18 @@ int main()
 		{
 			//double t = (double)cvGetTickCount();
 
-			slidingWindows.insertKeyFrame(grayImage, depthImage, R_c_0, T_c_0 );
+			slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, R_c_0, T_c_0 );
 
 			cout << "estimate position[before BA]:\n" 
 				<< slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
 
 
-			//slidingWindows.PhotometricBA();
+			slidingWindows.PhotometricBA();
 
 			//t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
 			//printf("BA cal time: %f\n", t);
 
-			//slidingWindows.planeDection();
+			slidingWindows.planeDection();
 
 			R_k_c = Matrix3d::Identity();
 			T_k_c = Vector3d::Zero();

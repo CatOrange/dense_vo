@@ -25,8 +25,9 @@
 #include <fstream>
 #include <vector>
 #include <map>
+#include <list>
 #include <omp.h>
-//#include <boost/thread.hpp>
+#include <boost/thread.hpp>
 
 //for SLAM
 #include "kMeansClustering.h"
@@ -49,8 +50,11 @@
 #include "opencv2/core/core.hpp"
 #include "opencv2/features2d/features2d.hpp"
 
+#include "visensor_node/visensor_imu.h"
+#include "visensor_node/visensor_calibration.h"
+
 //for sensor driver
-#include "PrimeSenseCam.h"
+//#include "PrimeSenseCam.h"
 
 //for multithread
 //#include <boost/thread.hpp>
@@ -60,8 +64,9 @@ using namespace std;
 using namespace cv;
 using namespace Eigen;
 
-CAMER_PARAMETERS cameraParameters ;
 //CAMER_PARAMETERS cameraParameters(535.4, 539.2, 320.1, 247.6);//TUM Freiburg 3 sequences
+CAMER_PARAMETERS cameraParameters ;
+CAMER_PARAMETERS stereoPara[2] ;
 //CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6,	255.3,	0.2624, -0.9531, -0.0054, 0.0026, 1.1633);
 //CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6, 255.3);//TUM Freiburg 1 sequences
 STATEESTIMATION slidingWindows(IMAGE_HEIGHT, IMAGE_WIDTH, &cameraParameters);
@@ -74,12 +79,18 @@ ros::Publisher pub_path ;
 ros::Publisher pub_odometry ;
 ros::Publisher pub_pose ;
 ros::Publisher pub_cloud ;
-ros::Publisher pub_grayImage ;
-ros::Subscriber sub_image;
+ros::Subscriber sub_image[2];
+ros::Subscriber sub_imu;
+ros::Subscriber sub_cali ;
 visualization_msgs::Marker path_line;
+
+list<visensor_node::visensor_imu> imuQueue ;
+list<sensor_msgs::Image> imageQueue[2] ;
+//list<ros::Time> imageTimeQueue[2] ;
 
 Mat depthImage[maxPyramidLevel*bufferSize];
 Mat grayImage[maxPyramidLevel*bufferSize];
+//Mat grayImage[maxPyramidLevel*bufferSize];
 STATE tmpState;
 STATE* lastFrame;
 
@@ -91,6 +102,9 @@ Matrix3d R_k_c;//R_k^(k+1)
 Matrix3d R_c_0;
 Vector3d T_k_c;//T_k^(k+1)
 Vector3d T_c_0;
+
+cv::StereoBM bm_( cv::StereoBM::BASIC_PRESET, 96, 21 );
+double lastTime = -1 ;
 
 Vector3d R_to_ypr(const Matrix3d& R)
 {
@@ -133,42 +147,60 @@ void RtoEulerAngles(Matrix3d R, double a[3])
 
 void initCalibrationParameters()
 {
-    FileStorage fs("/home/nova/calibration/camera_rgbd_sensor.yml", FileStorage::READ);
+    FileStorage fs("/home/nova/calibration/visensor.yml", FileStorage::READ);
 
-    Mat cameraMatrix ;
-    Mat distortionCoff ;
+    if (fs.isOpened() == false ){
+        ROS_WARN("Can not open") ;
+        return ;
+    }
 
-//    if (fs.isOpened() == false ){
-//        puts("Can not open") ;
-//        return ;
-//    }
+    char tmp[128] ;
+    cv::Mat cvRic ;
+    cv::Mat cvTic ;
+    cv::Mat dist_coeff ;
+    cv::Mat K ;
+    Eigen::Matrix3d Ric ;
+    Eigen::Vector3d Tic ;
+    for( int camera_id = 0 ; camera_id < 2 ; camera_id++ )
+    {
+        std::sprintf(tmp, "Ric_%d", camera_id ) ;
+        fs[tmp] >> cvRic ;
+        for( int i = 0 ; i < 3 ; i++ ){
+            for ( int j = 0 ; j < 3 ; j++ ){
+                Ric(i, j) = cvRic.at<double>(i, j) ;
+            }
+        }
 
+        std::sprintf(tmp, "Tic_%d", camera_id ) ;
+        fs[tmp] >> cvTic ;
+        for( int i = 0 ; i < 3 ; i++ ){
+            Tic(i) = cvTic.at<double>(i, 0) ;
+        }
 
-    cameraMatrix = cv::Mat::zeros(3, 3, CV_32F ) ;
-    cameraMatrix.at<float>(0, 0) = 270.310139 ;
-    cameraMatrix.at<float>(0, 2) = 157.085025 ;
-    cameraMatrix.at<float>(1, 1) = 269.501236 ;
-    cameraMatrix.at<float>(1, 2) = 127.390471 ;
-    cameraMatrix.at<float>(2, 2) = 1.0 ;
+        stereoPara[camera_id].setExtrinsics( Ric, Tic );
 
-    distortionCoff = cv::Mat::zeros(1, 4, CV_32F ) ;
-    distortionCoff.at<float>(0, 0) = 0.030448 ;
-    distortionCoff.at<float>(0, 1) = -0.095764 ;
-    distortionCoff.at<float>(0, 2) = 0.007353999999999999 ;
-    distortionCoff.at<float>(0, 3) = 0.001485 ;
+        std::sprintf(tmp, "dist_coeff_%d", camera_id ) ;
+        fs[tmp] >>  dist_coeff ;
 
-//    fs["camera_matrix"] >> cameraMatrix ;
-//    fs["distortion_coefficients"] >> distortionCoff ;
+        stereoPara[camera_id].setDistortionCoff( dist_coeff.at<double>(0, 0), dist_coeff.at<double>(1, 0),
+                             dist_coeff.at<double>(2, 0), dist_coeff.at<double>(3, 0), dist_coeff.at<double>(4, 0) );
 
-    cameraParameters.cameraMatrix = cameraMatrix ;
-    cameraParameters.setParameters(
-                cameraMatrix.at<float>(0, 0), cameraMatrix.at<float>(1, 1),
-                cameraMatrix.at<float>(0, 2), cameraMatrix.at<float>(1, 2));
-    cameraParameters.distCoeffs = distortionCoff ;
+        std::sprintf(tmp, "K_%d", camera_id ) ;
+        fs[tmp] >> K ;
 
-//    fs.release();
+        double fx = K.at<double>(0, 0);
+        double fy = K.at<double>(1, 1);
+        double cx = K.at<double>(0, 2);
+        double cy = K.at<double>(1, 2);
 
+        fx /= 2.0;
+        fy /= 2.0;
+        cx = (cx + 0.5) / 2.0 - 0.5;
+        cy = (cy + 0.5) / 2.0 - 0.5;
 
+        stereoPara[camera_id].setParameters(fx, fy, cx, cy);
+    }
+    cameraParameters = stereoPara[1] ;
 }
 
 void pubOdometry(const Vector3d& p, const Matrix3d& R )
@@ -223,10 +255,108 @@ void init()
     //cam.start();
 }
 
-int cnt = 0;
-
 void estimateCurrentState()
 {
+
+    if ( imageQueue[0].empty() || imageQueue[1].empty() ){
+      return;
+    }
+    list<sensor_msgs::Image>::iterator iter0 = imageQueue[0].begin();
+    list<sensor_msgs::Image>::iterator iter1 = imageQueue[1].begin();
+    while ( iter0->header.stamp > iter1->header.stamp )
+    {
+        iter1 =  imageQueue[1].erase( iter1 ) ;
+    }
+    while ( iter0->header.stamp < iter1->header.stamp )
+    {
+        iter0 =  imageQueue[0].erase( iter0 ) ;
+    }
+    if ( imuQueue.empty() ){
+        return ;
+    }
+    ros::Time imageTimeStamp = iter0->header.stamp ;
+    list<visensor_node::visensor_imu>::reverse_iterator reverse_iterImu = imuQueue.rbegin() ;
+    if ( reverse_iterImu->header.stamp < imageTimeStamp ){
+        return ;
+    }
+    //begin integrate imu data
+    list<visensor_node::visensor_imu>::iterator iterImu = imuQueue.begin() ;
+
+    Quaterniond q, dq ;
+    q.setIdentity() ;
+    while ( iterImu->header.stamp < imageTimeStamp )
+    {
+        double t = iterImu->header.stamp.toSec() ;
+        if ( lastTime < 0 ){
+            lastTime = t ;
+        }
+        double dt = t - lastTime ;
+        lastTime = t ;
+        dq.x() = iterImu->angular_velocity.x*dt*0.5 ;
+        dq.y() = iterImu->angular_velocity.y*dt*0.5 ;
+        dq.z() = iterImu->angular_velocity.z*dt*0.5 ;
+        dq.w() =  sqrt( 1 - SQ(dq.x()) * SQ(dq.y()) * SQ(dq.z()) ) ;
+        q = (q * dq).normalized();
+        //cout << "[Pop out] " <<  iterImu->header << endl ;
+        iterImu = imuQueue.erase( iterImu ) ;
+    }
+    //printf("x=%f y=%f z=%f w=%f\n", q.x(), q.y(), q.z(), q.w() ) ;
+
+    cv::Mat img0, img1;
+    img0.create(iter0->height, iter0->width, CV_8UC1);
+    memcpy(&img0.data[0], &iter0->data[0], iter0->height*iter0->width ) ;
+
+    img1.create(iter1->height, iter1->width, CV_8UC1);
+    memcpy(&img1.data[0], &iter1->data[0], iter1->height*iter1->width ) ;
+
+    imshow("image0", img0 ) ;
+    imshow("image1", img1 ) ;
+
+    double t = (double)cvGetTickCount();
+
+    Mat disparity ;
+    bm_(img1, img0, disparity, CV_32F);
+
+    printf("block mathcing time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
+
+    Mat depthImage ;
+    int height = iter0->height ;
+    int width = iter0->width ;
+    depthImage.create(iter0->height, iter0->width, CV_32F );
+    double baseline = ( stereoPara[0].Tic - stereoPara[1].Tic ).norm() ;
+    double f = stereoPara[1].fx[0] ;
+
+    printf("baseline=%f f=%f\n", baseline, f ) ;
+
+    float testSum = 0 ;
+    int cnt = 0 ;
+    for ( int i = 0 ; i < height ; i++ )
+    {
+        for ( int j = 0 ; j < width ; j++ )
+        {
+            float d = disparity.at<float>(i, j) ;
+            if (  d < 3 ) {
+                depthImage.at<float>(i, j) = 0 ;
+            }
+            else {
+                depthImage.at<float>(i, j) = baseline * f / d ;
+                testSum += depthImage.at<float>(i, j) ;
+                cnt++ ;
+            }
+        }
+    }
+    ROS_INFO("testNum = %f\n",  testSum/cnt ) ;
+
+    //cv::Mat falsecolorsmap;
+    //cv::applyColorMap(disp, falsecolorsmap, cv::COLORMAP_RAINBOW);
+
+    imshow("diparity", disparity/128.0 ) ;
+
+    imageQueue[0].pop_front();
+    imageQueue[1].pop_front();
+
+    waitKey(1) ;
+/*
     for ( int bufferLength = ( bufferTail - bufferHead + bufferSize ) % bufferSize ; bufferLength > 0 ; bufferLength-- )
     {
 
@@ -299,61 +429,49 @@ void estimateCurrentState()
             bufferHead -= bufferSize ;
         }
     }
+ */
 }
 
-void imageCallBack(const sensor_msgs::ImageConstPtr& msg)
+void imuCallBack(const visensor_node::visensor_imu& imu_msg )
 {
-    //printf("%d\n", rgbImageNum++ ) ;
-    cv::Mat currentImage = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8)->image;
+    imuQueue.push_back( imu_msg );
+    //cout << "imu" << endl << imu_msg.header << endl ;
+}
 
-    int startIndex = bufferTail * maxPyramidLevel ;
-    const int h2 =  IMAGE_HEIGHT* 2 ;
-    for ( int i = 0 ; i < IMAGE_HEIGHT ; i++ )
-    {
-        for ( int j = 0 ; j < IMAGE_WIDTH ; j++ )
-        {
-            grayImage[startIndex+0].at<unsigned char>(i, j) = currentImage.at<unsigned char>(i, j) ;
-            unsigned short high8 = currentImage.at<unsigned char>(i+IMAGE_HEIGHT, j) ;
-            unsigned short low8 = currentImage.at<unsigned char>(i+h2, j) ;
-            unsigned short tmp = ( high8 << 8 ) | low8 ;
-            depthImage[startIndex+0].at<float>(i, j) = (float)tmp / 1000.0 ;
-        }
-    }
+void image0CallBack(const sensor_msgs::ImageConstPtr& msg)
+{
+    imageQueue[0].push_back( *msg );
+    //imageQueue[0].push_back( cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8)->image );
+//    cv::Mat currentImage = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8)->image;
+//    int startIndex = bufferTail * maxPyramidLevel ;
+//    grayImage0[startIndex] = currentImage.clone() ;
 
-//    imshow("grayImage", grayImage[0]) ;
-//    waitKey(1) ;
-
-//    if ( depthImage[0].rows != grayImage[0].rows || depthImage[0].cols != grayImage[0].cols ){
-//        return ;
+//    for (int kk = 1; kk < maxPyramidLevel; kk++){
+//        pyrDownMeanSmooth<uchar>(grayImage0[startIndex + kk - 1], grayImage0[startIndex + kk]);
 //    }
-//    depthImage[0] /= 1000;
 
-//    printf("%d %d %d %d %d\n", grayImage[0].at<uchar>(160, 120), grayImage[0].at<uchar>(10, 10),
-//            grayImage[0].at<uchar>(310, 230), grayImage[0].at<uchar>(0, 230), grayImage[0].at<uchar>(310, 10) ) ;
+//    bufferTail++ ;
+//    if ( bufferTail >= bufferSize ){
+//        bufferTail -= bufferSize ;
+//    }
+}
 
-    //printf("depth = %f\n", depthImage[0].at<float>(120, 160) ) ;
+void image1CallBack(const sensor_msgs::ImageConstPtr& msg)
+{
+    imageQueue[1].push_back( *msg );
+//    sensor_msgs::Image = *msg ;
+//    cv::Mat currentImage = cv_bridge::toCvShare(msg, sensor_msgs::image_encodings::MONO8)->image;
+//    int startIndex = bufferTail * maxPyramidLevel ;
+//    grayImage1[startIndex] = currentImage.clone() ;
 
-    //grayImage
-//#ifdef DOWNSAMPLING
-//    pyrDownMeanSmooth<uchar>(grayImage[0], grayImage[0]);
-//#endif
+//    for (int kk = 1; kk < maxPyramidLevel; kk++){
+//        pyrDownMeanSmooth<uchar>(grayImage1[startIndex + kk - 1], grayImage1[startIndex + kk]);
+//    }
 
-    //depthImage[0].convertTo(depthImage[0], CV_32F );
-
-//#ifdef DOWNSAMPLING
-//    pyrDownMedianSmooth<float>(depthImage[0], depthImage[0]);
-//#endif
-
-
-    for (int kk = 1; kk < maxPyramidLevel; kk++){
-        pyrDownMeanSmooth<uchar>(grayImage[startIndex + kk - 1], grayImage[startIndex + kk]);
-        pyrDownMedianSmooth<float>(depthImage[startIndex + kk - 1], depthImage[startIndex + kk ]);
-    }
-
-    bufferTail++ ;
-    if ( bufferTail >= bufferSize ){
-        bufferTail -= bufferSize ;
-    }
+//    bufferTail++ ;
+//    if ( bufferTail >= bufferSize ){
+//        bufferTail -= bufferSize ;
+//    }
 }
 
 /*
@@ -384,6 +502,49 @@ void fun()
 }
 */
 
+/*
+void caliCallBack(const visensor_node::visensor_calibration & msg)
+{
+    readyCaliNum++ ;
+    cout << msg << endl ;
+
+    int index = 0 ;
+    if ( msg.cam_name == "cam1" ) {
+        index = 1 ;
+    }
+
+    Eigen::Quaterniond q_IC;
+    q_IC.x() = msg.T_IC.orientation.x ;
+    q_IC.y() = msg.T_IC.orientation.y ;
+    q_IC.z() = msg.T_IC.orientation.z ;
+    q_IC.w() = msg.T_IC.orientation.w ;
+
+    Eigen::Matrix3d Ric(q_IC) ;
+    Eigen::Vector3d Tic ;
+    Tic(0) = msg.T_IC.position.x ;
+    Tic(1) = msg.T_IC.position.y ;
+    Tic(2) = msg.T_IC.position.z ;
+
+    double fx = msg.focal_length[0] ;
+    double fy = msg.focal_length[1] ;
+    double cx = msg.principal_point[0] ;
+    double cy = msg.principal_point[1] ;
+
+    fx /= 2.0;
+    fy /= 2.0;
+    cx = (cx + 0.5) / 2.0 - 0.5;
+    cy = (cy + 0.5) / 2.0 - 0.5;
+
+    stereoPara[index].setExtrinsics(Ric, Tic);
+    stereoPara[index].setParameters( fx, fy, cx, cy );
+    stereoPara[index].setDistortionCoff( msg.dist_coeff[0], msg.dist_coeff[1], msg.dist_coeff[2], msg.dist_coeff[3], msg.dist_coeff[4] );
+
+    if ( index == 1 ){
+        cameraParameters = stereoPara[1] ;
+    }
+}
+*/
+
 int main(int argc, char** argv )
 {
     init() ;
@@ -391,7 +552,10 @@ int main(int argc, char** argv )
     ros::NodeHandle n ;
     //ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug);
 
-    sub_image = n.subscribe("camera/grayAndDepthImage", 10, &imageCallBack);
+    sub_image[0] = n.subscribe("/cam0", 10, &image0CallBack);
+    sub_image[1] = n.subscribe("/cam1", 10, &image1CallBack);
+    sub_imu = n.subscribe("/cust_imu0", 1000, &imuCallBack ) ;
+    //sub_cali = n.subscribe("/calibration", 10, &caliCallBack ) ;
     //sub_depth = it.subscribe("/camera/depthImage", 20, &depthImageCallBack);
 
     //sub_image = it.subscribe("/camera/rgb/image_color", 100, &rgbImageCallBack);
@@ -403,7 +567,7 @@ int main(int argc, char** argv )
     pub_pose = n.advertise<geometry_msgs::PoseStamped>("/denseVO/pose", 1000);
     pub_cloud = n.advertise<sensor_msgs::PointCloud>("/denseVO/cloud", 1000);
 
-    //pub_grayImage = it.advertise("camera/grayImage", 1 );
+    //pub_grayImage = it.advertise("camera/grayImage", 1 );200
     //pub_depthImage = it.advertise("camera/depthImage", 1 ) ;
 
     path_line.header.frame_id    = "world";
@@ -419,11 +583,16 @@ int main(int argc, char** argv )
     path_line.points.push_back( geometry_msgs::Point());
     pub_path.publish(path_line);
 
-    //fun() ;
-
+    imuQueue.clear();
+    imageQueue[0].clear();
+    imageQueue[1].clear();
+//    ros::spinOnce() ;
+//    imuQueue.clear();
+//    imageQueue[0].clear();
+//    imageQueue[1].clear();
     ros::Rate loop_rate(200.0);
     bufferHead = bufferTail = 0 ;
-    while( n.ok() )
+    while( ros::ok() )
     {
         loop_rate.sleep() ;
         ros::spinOnce() ;

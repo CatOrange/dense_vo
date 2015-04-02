@@ -10,12 +10,40 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  geometry_msgs
+  sensor_msgs 
   cv_bridge
   image_transport
+  message_generation
+  camera_info_manager 
+  dynamic_reconfigure
+  cmake_modules
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+
+find_package(libvisensor 1.1.0 REQUIRED)
+
+add_message_files(
+  DIRECTORY msg
+  FILES visensor_imu.msg 
+  visensor_time_host.msg
+  visensor_calibration.msg
+)
+
+add_service_files(
+	FILES
+	visensor_calibration_service.srv
+)
+
+generate_messages(DEPENDENCIES geometry_msgs)
+
+if(NOT DEFINED CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE Release)
+endif(NOT DEFINED CMAKE_BUILD_TYPE)
+
+generate_dynamic_reconfigure_options(cfg/dense_vo_node.cfg)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -84,10 +112,14 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES IROS2015
-#  CATKIN_DEPENDS roscpp rospy std_msgs
-#  DEPENDS system_lib
+  INCLUDE_DIRS include ${catkin_INCLUDE_DIRS}
+  CATKIN_DEPENDS
+  roscpp 
+  sensor_msgs 
+  cv_bridge 
+  std_msgs 
+  image_transport 
+  camera_info_manager 
 )
 
 ###########
@@ -101,7 +133,10 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
   ${OPENNI2_INCLUDE}
+  ${libvisensor_INCLUDE_DIRS}
 )
+
+
 
 ## Declare a cpp library
 # add_library(IROS2015
@@ -109,21 +144,26 @@ include_directories(
 # )
 
 ## Declare a cpp executable
-add_executable(dense_vo_node src/denseVO.cpp)
-#rosbuild_add_openmp_flags(IROS2015_node)
+add_executable(dense_vo_node src/denseStereoVO.cpp)
+
+#add_executable(dense_vo_node src/denseVO.cpp)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
 # add_dependencies(IROS2015_node IROS2015_generate_messages_cpp)
 
+add_dependencies(dense_vo_node ${${PROJECT_NAME}_EXPORTED_TARGETS}})
+
 ## Specify libraries to link a library or executable target against
 target_link_libraries(dense_vo_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
+  ${libvisensor_LIBRARIES}
   OpenNI2
  # ${Boost_FILESYSTEM_LIBRARY} 
  # ${Boost_SYSTEM_LIBRARY}
 )
+
 
 #############
 ## Install ##

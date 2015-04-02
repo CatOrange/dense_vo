@@ -148,32 +148,43 @@ public:
 
 struct CAMER_PARAMETERS
 {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  Eigen::Matrix3d Ric ;
+  Eigen::Vector3d Tic ;
 	cv::Mat cameraMatrix = cv::Mat::zeros(3, 3, CV_64FC1 );
 	cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64FC1 );
 	double fy[maxPyramidLevel], fx[maxPyramidLevel], cy[maxPyramidLevel], cx[maxPyramidLevel];
 
-	CAMER_PARAMETERS(double input_fx, double input_fy, double input_cx, double input_cy )
-	{
-		fx[0] = input_fx;
-		fy[0] = input_fy;
-		cx[0] = input_cx;
-		cy[0] = input_cy;
+	//CAMER_PARAMETERS(double input_fx, double input_fy, double input_cx, double input_cy )
+	//{
+	//	fx[0] = input_fx;
+	//	fy[0] = input_fy;
+	//	cx[0] = input_cx;
+	//	cy[0] = input_cy;
 
-#ifdef DOWNSAMPLING
-		fx[0] /= 2.0;
-		fy[0] /= 2.0;
-		cx[0] = (cx[0] + 0.5) / 2.0 - 0.5;
-		cy[0] = (cy[0] + 0.5) / 2.0 - 0.5;
-#endif
+//#ifdef DOWNSAMPLING
+//		fx[0] /= 2.0;
+//		fy[0] /= 2.0;
+//		cx[0] = (cx[0] + 0.5) / 2.0 - 0.5;
+//		cy[0] = (cy[0] + 0.5) / 2.0 - 0.5;
+//#endif
 
-		initPyramidParameters();
+    //initPyramidParameters();
 
-		cameraMatrix.at<double>(0, 0) = input_fx;
-		cameraMatrix.at<double>(0, 2) = input_cx;
-		cameraMatrix.at<double>(1, 1) = input_fy;
-		cameraMatrix.at<double>(1, 2) = input_cy;
-		cameraMatrix.at<double>(2, 2) = 1.0;
+	//	cameraMatrix.at<double>(0, 0) = input_fx;
+	//	cameraMatrix.at<double>(0, 2) = input_cx;
+	//	cameraMatrix.at<double>(1, 1) = input_fy;
+	//	cameraMatrix.at<double>(1, 2) = input_cy;
+	//	cameraMatrix.at<double>(2, 2) = 1.0;
+	//}
+	CAMER_PARAMETERS(){
 	}
+
+  void setExtrinsics( const Eigen::Matrix3d& R, const Eigen::Vector3d& T )
+  {
+    Ric = R ;
+    Tic = T ;
+  }
 
 	void setParameters(double input_fx, double input_fy, double input_cx, double input_cy)
 	{
@@ -182,20 +193,13 @@ struct CAMER_PARAMETERS
 		cx[0] = input_cx;
 		cy[0] = input_cy;
 
-#ifdef DOWNSAMPLING
-		fx[0] /= 2.0;
-		fy[0] /= 2.0;
-		cx[0] = (cx[0] + 0.5) / 2.0 - 0.5;
-		cy[0] = (cy[0] + 0.5) / 2.0 - 0.5;
-#endif
-
 		initPyramidParameters();
 
-    cameraMatrix.at<double>(0, 0) = input_fx;
-    cameraMatrix.at<double>(0, 2) = input_cx;
-    cameraMatrix.at<double>(1, 1) = input_fy;
-    cameraMatrix.at<double>(1, 2) = input_cy;
-    cameraMatrix.at<double>(2, 2) = 1.0;
+		cameraMatrix.at<double>(0, 0) = input_fx;
+		cameraMatrix.at<double>(0, 2) = input_cx;
+		cameraMatrix.at<double>(1, 1) = input_fy;
+		cameraMatrix.at<double>(1, 2) = input_cy;
+		cameraMatrix.at<double>(2, 2) = 1.0;
 	}
 
 	void setDistortionCoff( double d0, double d1, double d2, double d3, double d4)
