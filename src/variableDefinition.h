@@ -103,4 +103,7 @@ const int ompNumThreads = 2;
 for ros
 */
 const int bufferSize = 10 ;
+
+const int maxDisparity = 96 ;
+
 #endif
