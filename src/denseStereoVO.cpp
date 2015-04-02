@@ -90,6 +90,7 @@ list<sensor_msgs::Image> imageQueue[2] ;
 
 Mat depthImage[maxPyramidLevel];
 Mat grayImage[maxPyramidLevel];
+Mat gradientMapForDebug ;
 //Mat grayImage[maxPyramidLevel*bufferSize];
 STATE tmpState;
 STATE* lastFrame;
@@ -106,17 +107,17 @@ double lastTime = -1 ;
 
 Vector3d R_to_ypr(const Matrix3d& R)
 {
-  Vector3d n = R.col(0);
-  Vector3d o = R.col(1);
-  Vector3d a = R.col(2);
-  Vector3d ypr(3);
-  double y = atan2(n(1), n(0));
-  double p = atan2(-n(2), n(0) * cos(y) + n(1) * sin(y));
-  double r = atan2(a(0) * sin(y) - a(1) * cos(y), -o(0) * sin(y) + o(1) * cos(y));
-  ypr(0) = y;
-  ypr(1) = p;
-  ypr(2) = r;
-  return 180.0 / PI * ypr;
+    Vector3d n = R.col(0);
+    Vector3d o = R.col(1);
+    Vector3d a = R.col(2);
+    Vector3d ypr(3);
+    double y = atan2(n(1), n(0));
+    double p = atan2(-n(2), n(0) * cos(y) + n(1) * sin(y));
+    double r = atan2(a(0) * sin(y) - a(1) * cos(y), -o(0) * sin(y) + o(1) * cos(y));
+    ypr(0) = y;
+    ypr(1) = p;
+    ypr(2) = r;
+    return 180.0 / PI * ypr;
 }
 
 void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
@@ -181,7 +182,7 @@ void initCalibrationParameters()
         fs[tmp] >>  dist_coeff ;
 
         stereoPara[camera_id].setDistortionCoff( dist_coeff.at<double>(0, 0), dist_coeff.at<double>(1, 0),
-                             dist_coeff.at<double>(2, 0), dist_coeff.at<double>(3, 0), dist_coeff.at<double>(4, 0) );
+                                                 dist_coeff.at<double>(2, 0), dist_coeff.at<double>(3, 0), dist_coeff.at<double>(4, 0) );
 
         std::sprintf(tmp, "K_%d", camera_id ) ;
         fs[tmp] >> K ;
@@ -245,25 +246,27 @@ void init()
         grayImage[i] = Mat::zeros(height, width, CV_8U ) ;
         depthImage[i] = Mat::zeros(height, width, CV_32F ) ;
     }
+    //gradientMapForDebug.create(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8UC3);
     initCalibrationParameters() ;
     //cam.start();
 }
 
 int cnt = 0 ;
 
+
 void estimateCurrentState()
 {
 
     if ( imageQueue[0].empty() || imageQueue[1].empty() ){
-      return;
+        return;
     }
     list<sensor_msgs::Image>::iterator iter0 = imageQueue[0].begin();
     list<sensor_msgs::Image>::iterator iter1 = imageQueue[1].begin();
-    while ( iter0->header.stamp > iter1->header.stamp )
+    while ( iter1 != imageQueue[1].end() && iter0->header.stamp > iter1->header.stamp )
     {
         iter1 =  imageQueue[1].erase( iter1 ) ;
     }
-    while ( iter0->header.stamp < iter1->header.stamp )
+    while ( iter0 != imageQueue[0].end() && iter0->header.stamp < iter1->header.stamp )
     {
         iter0 =  imageQueue[0].erase( iter0 ) ;
     }
@@ -276,6 +279,7 @@ void estimateCurrentState()
         return ;
     }
 
+    double t = (double)cvGetTickCount();
 
     //begin integrate imu data
     list<visensor_node::visensor_imu>::iterator iterImu = imuQueue.begin() ;
@@ -290,8 +294,8 @@ void estimateCurrentState()
         }
         double dt = t - lastTime ;
         lastTime = t ;
-        dq.x() = -iterImu->angular_velocity.x*dt*0.5 ;
-        dq.y() = -iterImu->angular_velocity.y*dt*0.5 ;
+        dq.x() = iterImu->angular_velocity.x*dt*0.5 ;
+        dq.y() = iterImu->angular_velocity.y*dt*0.5 ;
         dq.z() = iterImu->angular_velocity.z*dt*0.5 ;
         dq.w() =  sqrt( 1 - SQ(dq.x()) * SQ(dq.y()) * SQ(dq.z()) ) ;
         q = (q * dq).normalized();
@@ -300,91 +304,80 @@ void estimateCurrentState()
     }
     //printf("x=%f y=%f z=%f w=%f\n", q.x(), q.y(), q.z(), q.w() ) ;
 
-    cv::Mat img0, img1;
-    img0.create(iter0->height, iter0->width, CV_8UC1);
-    memcpy(&img0.data[0], &iter0->data[0], iter0->height*iter0->width ) ;
+    Mat img0, img1;
+    Mat disparity, depth1 ;
 
     img1.create(iter1->height, iter1->width, CV_8UC1);
     memcpy(&img1.data[0], &iter1->data[0], iter1->height*iter1->width ) ;
 
-    imshow("image0", img0 ) ;
-    imshow("image1", img1 ) ;
+    grayImage[0] = img1 ;
+    for (int kk = 1; kk < maxPyramidLevel; kk++){
+        pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
+    }
 
-    double t = (double)cvGetTickCount();
-
-    Mat disparity ;
-    bm_(img1, img0, disparity, CV_32F);
-
-    printf("block mathcing time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
-
-    Mat depthImage ;
-    int height = iter0->height ;
-    int width = iter0->width ;
-    depthImage.create(iter0->height, iter0->width, CV_32F );
-    double baseline = ( stereoPara[0].Tic - stereoPara[1].Tic ).norm() ;
-    double f = stereoPara[1].fx[0] ;
-
-    //printf("baseline=%f f=%f\n", baseline, f ) ;
-    //float testSum = 0 ;
-    //int cnt = 0 ;
-    for ( int i = 0 ; i < height ; i++ )
+    cnt++ ;
+    if ( vst == false || (cnt % keyFrameInterval) == 1 )
     {
-        for ( int j = 0 ; j < width ; j++ )
+        img0.create(iter0->height, iter0->width, CV_8UC1);
+        memcpy(&img0.data[0], &iter0->data[0], iter0->height*iter0->width ) ;
+
+        bm_(img1, img0, disparity, CV_32F);
+        int height = iter0->height ;
+        int width = iter0->width ;
+        depth1.create(iter0->height, iter0->width, CV_32F );
+        double baseline = ( stereoPara[0].Tic - stereoPara[1].Tic ).norm() ;
+        double f = stereoPara[1].fx[0] ;
+
+        //printf("baseline=%f f=%f\n", baseline, f ) ;
+        //float testSum = 0 ;
+        //int cnt = 0 ;
+        for ( int i = 0 ; i < height ; i++ )
         {
-            float d = disparity.at<float>(i, j) ;
-            if (  d < 1.5 ) {
-                depthImage.at<float>(i, j) = 0 ;
+            for ( int j = 0 ; j < width ; j++ )
+            {
+                float d = disparity.at<float>(i, j) ;
+                if (  d < 1.5 ) {
+                    depth1.at<float>(i, j) = 0 ;
+                }
+                else {
+                    depth1.at<float>(i, j) = baseline * f / d ;
+                    //                testSum += depthImage.at<float>(i, j) ;
+                    //                cnt++ ;
+                }
             }
-            else {
-                depthImage.at<float>(i, j) = baseline * f / d ;
-//                testSum += depthImage.at<float>(i, j) ;
-//                cnt++ ;
-            }
+        }
+        //ROS_INFO("testNum = %f\n",  testSum/cnt ) ;
+        depthImage[0] = depth1 ;
+        for (int kk = 1; kk < maxPyramidLevel; kk++){
+            pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
         }
     }
-    //ROS_INFO("testNum = %f\n",  testSum/cnt ) ;
 
-    //cv::Mat falsecolorsmap;
-    //cv::applyColorMap(disp, falsecolorsmap, cv::COLORMAP_RAINBOW);
-
-    imshow("diparity", disparity/maxDisparity ) ;
-
-    imageQueue[0].pop_front();
-    imageQueue[1].pop_front();
-
-    waitKey(1) ;
-/*
-    for ( int bufferLength = ( bufferTail - bufferHead + bufferSize ) % bufferSize ; bufferLength > 0 ; bufferLength-- )
+    if (vst == false )//the first frame
     {
+        vst = true;
+        slidingWindows.insertKeyFrame(grayImage, depthImage, gradientMapForDebug, Matrix3d::Identity(), Vector3d::Zero() );
+        //slidingWindows.planeDection();
 
-        cnt++ ;
-        double t = (double)cvGetTickCount();
+        R_k_c = Matrix3d::Identity();
+        T_k_c = Vector3d::Zero();
 
-        if (vst == false )//the first frame
-        {
-            vst = true;
+        lastFrame = &slidingWindows.states[slidingWindows.tail];
+    }
+    else
+    {
+        //imu prior for rotation
+        Matrix3d deltaR(q) ;
+        R_k_c = deltaR.transpose() * R_k_c ;
 
-            slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero() );
-            //slidingWindows.planeDection();
+        //puts("before dense tracking") ;
 
-            R_k_c = Matrix3d::Identity();
-            T_k_c = Vector3d::Zero();
-
-            lastFrame = &slidingWindows.states[slidingWindows.tail];
-
-            bufferHead++ ;
-            if ( bufferHead >= bufferSize ){
-                bufferHead -= bufferSize ;
-            }
-
-            continue ;
-        }
-
-    #ifdef FRAME_TO_FRAME
+#ifdef FRAME_TO_FRAME
         frameToFrameDenseTracking(R_k_c, T_k_c);
-    #else
-        keyframeToFrameDenseTracking( bufferHead, R_k_c, T_k_c );
-    #endif
+#else
+        keyframeToFrameDenseTracking( R_k_c, T_k_c );
+#endif
+        //puts("after dense tracking") ;
 
         R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
         T_c_0 = R_c_0*(
@@ -393,15 +386,9 @@ void estimateCurrentState()
         pubOdometry(T_c_0, R_c_0);
         pubPath(T_c_0);
 
-        //cv::Mat falseColorsMap;
-        //applyColorMap(residualImage, falseColorsMap, cv::COLORMAP_RAINBOW );
-
-        //cv::imshow("Resid", falseColorsMap);
-        //cv::waitKey(10) ;
-
         if ((cnt % keyFrameInterval) == 1)
         {
-            slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, R_c_0, T_c_0 );
+            slidingWindows.insertKeyFrame(grayImage, depthImage, gradientMapForDebug, R_c_0, T_c_0 );
 
             //pubOdometry(T_c_0, R_c_0);
             //pubPath(T_c_0);
@@ -413,20 +400,31 @@ void estimateCurrentState()
         }
         else
         {
-    #ifdef FRAME_TO_FRAME
+#ifdef FRAME_TO_FRAME
             lastFrame = &tmpState;
             tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
-    #endif
-        }
-
-        printf("dense tracking time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
-
-        bufferHead++ ;
-        if ( bufferHead >= bufferSize ){
-            bufferHead -= bufferSize ;
+#endif
         }
     }
- */
+
+    //printf("estimation time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
+
+    imshow("image1", img1 ) ;
+    cv::moveWindow("image1", 0, 0 );
+    imshow("dense key points", gradientMapForDebug ) ;
+    cv::moveWindow("dense key points", 350, 0 );
+
+    if ( vst == false || (cnt % keyFrameInterval) == 1 ){
+        imshow("image0", img0 ) ;
+        cv::moveWindow("image0", 350, 350 );
+        imshow("diparity", disparity/maxDisparity ) ;
+        cv::moveWindow("diparity", 0, 350 );
+    }
+
+    imageQueue[0].pop_front();
+    imageQueue[1].pop_front();
+
+    waitKey(1) ;
 }
 
 void imuCallBack(const visensor_node::visensor_imu& imu_msg )
@@ -495,8 +493,8 @@ int main(int argc, char** argv )
     ros::NodeHandle n ;
     //ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Debug);
 
-    sub_image[0] = n.subscribe("/cam0", 10, &image0CallBack);
-    sub_image[1] = n.subscribe("/cam1", 10, &image1CallBack);
+    sub_image[0] = n.subscribe("/cam0", 20, &image0CallBack );
+    sub_image[1] = n.subscribe("/cam1", 20, &image1CallBack );
     sub_imu = n.subscribe("/cust_imu0", 1000, &imuCallBack ) ;
     //sub_cali = n.subscribe("/calibration", 10, &caliCallBack ) ;
     //sub_depth = it.subscribe("/camera/depthImage", 20, &depthImageCallBack);
@@ -529,10 +527,10 @@ int main(int argc, char** argv )
     imuQueue.clear();
     imageQueue[0].clear();
     imageQueue[1].clear();
-//    ros::spinOnce() ;
-//    imuQueue.clear();
-//    imageQueue[0].clear();
-//    imageQueue[1].clear();
+    //    ros::spinOnce() ;
+    //    imuQueue.clear();
+    //    imageQueue[0].clear();
+    //    imageQueue[1].clear();
     ros::Rate loop_rate(500.0);
     while( ros::ok() )
     {

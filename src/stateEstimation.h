@@ -858,8 +858,10 @@ public:
 	}
 
   void insertKeyFrame(const Mat grayImage[maxPyramidLevel], const Mat depthImage[maxPyramidLevel],
-                      const Matrix3d& R, const Vector3d& T)
+                      Mat& gradientMapForDebug, const Matrix3d& R, const Vector3d& T)
 	{
+    cv::cvtColor(grayImage[0], gradientMapForDebug, CV_GRAY2BGR);
+
 		if (numOfState == slidingWindowSize){
 			//puts("pop state");
 			popOldestState();
@@ -946,6 +948,10 @@ public:
 					int u = gradientList[cnt].u;
 					int v = gradientList[cnt].v;
 
+          gradientMapForDebug.at<Vec3b>(u, v)[0] = 0 ;
+          gradientMapForDebug.at<Vec3b>(u, v)[1] = 255 ;
+          gradientMapForDebug.at<Vec3b>(u, v)[2] = 0 ;
+
 					maskGradientFiltering[u][v] = true;
 				}
 			}
@@ -970,6 +976,7 @@ public:
 			{
 				int u = gradientList[cnt].u;
 				int v = gradientList[cnt].v;
+
 				int k = INDEX(u, v, n, m);
 				double Z = pDepth[k];
 
@@ -1187,9 +1194,9 @@ public:
 					int u = int(p1(1)*para->fy[level] / p1(2) + para->cy[level] + 0.5);
 					int v = int(p1(0)*para->fx[level] / p1(2) + para->cx[level] + 0.5);
 
-					gradientMap.at<cv::Vec3b>(u, v)[0] = 0;
-					gradientMap.at<cv::Vec3b>(u, v)[1] = 255;
-					gradientMap.at<cv::Vec3b>(u, v)[2] = 0;
+          gradientMap.at<cv::Vec3b>(u, v)[0] = 0;
+          gradientMap.at<cv::Vec3b>(u, v)[1] = 255;
+          gradientMap.at<cv::Vec3b>(u, v)[2] = 0;
 #endif
 
 					int u2 = int(p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5);
@@ -1201,9 +1208,9 @@ public:
 					//if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
 					//	continue;
 					//}
-					//if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-					//	continue;
-					//}
+          if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
+            continue;
+          }
 
 					//#ifdef DEBUG_DENSETRACKING
 					//						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
@@ -1246,7 +1253,7 @@ public:
 				cv::waitKey(500);
 #endif
 
-				if (actualNum < 6){
+        if (actualNum < 10){
 					puts("Dense Tracking: lack of rank!break!");
 					break;
 				}
