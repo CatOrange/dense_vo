@@ -1113,11 +1113,12 @@ public:
 		T += v;
 	}
 
-  void denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
+  bool denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
 	{
 		//no assumption on angular and linear velocity
 		Matrix3d tmpR = R;
 		Vector3d tmpT = T;
+    bool insertKeyFrameFlag = false;
 
 		//linear assumption on angular and linear velocity
 		//Matrix3d tmpR = last_delta_R * R ;
@@ -1253,10 +1254,18 @@ public:
 				cv::waitKey(500);
 #endif
 
-        if (actualNum < 10){
+        if (actualNum < 10)
+        {
+          if ( level == 0 ){
+            insertKeyFrameFlag = true ;
+          }
 					puts("Dense Tracking: lack of rank!break!");
 					break;
 				}
+
+        if ( level == 0 && (actualNum < (validNum>>1) || actualNum < 1000) ){
+          insertKeyFrameFlag = true ;
+        }
 
 				//        if (actualNum < (minDenseTrackingNum>>level) ){
 				//					puts("Dense Tracking: gradients are not rich!");
@@ -1335,6 +1344,8 @@ public:
 		}//end of pyramid level
 		R = tmpR;
 		T = tmpT;
+
+    return insertKeyFrameFlag ;
 	}
 
 	void popOldestState()

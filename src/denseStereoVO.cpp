@@ -130,10 +130,10 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
     R_k_c = nextR * R_k_c;
 }
 
-void keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
+bool keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
 {
     STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
+    return slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -306,6 +306,7 @@ void estimateCurrentState()
 
     Mat img0, img1;
     Mat disparity, depth1 ;
+    bool insertKeyFrameFlag = false ;
 
     img1.create(iter1->height, iter1->width, CV_8UC1);
     memcpy(&img1.data[0], &iter1->data[0], iter1->height*iter1->width ) ;
@@ -315,9 +316,11 @@ void estimateCurrentState()
         pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
     }
 
-    cnt++ ;
-    if ( vst == false || (cnt % keyFrameInterval) == 1 )
+    if ( vst == false )
     {
+        vst = true;
+        insertKeyFrameFlag = true ;
+
         img0.create(iter0->height, iter0->width, CV_8UC1);
         memcpy(&img0.data[0], &iter0->data[0], iter0->height*iter0->width ) ;
 
@@ -351,11 +354,7 @@ void estimateCurrentState()
         for (int kk = 1; kk < maxPyramidLevel; kk++){
             pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
         }
-    }
 
-    if (vst == false )//the first frame
-    {
-        vst = true;
         slidingWindows.insertKeyFrame(grayImage, depthImage, gradientMapForDebug, Matrix3d::Identity(), Vector3d::Zero() );
         //slidingWindows.planeDection();
 
@@ -368,16 +367,19 @@ void estimateCurrentState()
     {
         //imu prior for rotation
         Matrix3d deltaR(q) ;
-        R_k_c = deltaR.transpose() * R_k_c ;
+
+        Matrix3d deltaR_c = stereoPara[1].Ric.transpose() * deltaR * stereoPara[1].Ric ;
+
+        //R_k_c = deltaR.transpose() * R_k_c ;
+        R_k_c = deltaR_c.transpose() * R_k_c ;
 
         //puts("before dense tracking") ;
 
 #ifdef FRAME_TO_FRAME
         frameToFrameDenseTracking(R_k_c, T_k_c);
 #else
-        keyframeToFrameDenseTracking( R_k_c, T_k_c );
+        insertKeyFrameFlag = keyframeToFrameDenseTracking( R_k_c, T_k_c );
 #endif
-        //puts("after dense tracking") ;
 
         R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
         T_c_0 = R_c_0*(
@@ -386,13 +388,45 @@ void estimateCurrentState()
         pubOdometry(T_c_0, R_c_0);
         pubPath(T_c_0);
 
-        if ((cnt % keyFrameInterval) == 1)
-        {
-            slidingWindows.insertKeyFrame(grayImage, depthImage, gradientMapForDebug, R_c_0, T_c_0 );
+        if ( insertKeyFrameFlag == true )
 
-            //pubOdometry(T_c_0, R_c_0);
-            //pubPath(T_c_0);
-            cout << cnt/keyFrameInterval << "-" << "currentPosition:\n" << T_c_0.transpose() << endl;
+        {
+            img0.create(iter0->height, iter0->width, CV_8UC1);
+            memcpy(&img0.data[0], &iter0->data[0], iter0->height*iter0->width ) ;
+
+            bm_(img1, img0, disparity, CV_32F);
+            int height = iter0->height ;
+            int width = iter0->width ;
+            depth1.create(iter0->height, iter0->width, CV_32F );
+            double baseline = ( stereoPara[0].Tic - stereoPara[1].Tic ).norm() ;
+            double f = stereoPara[1].fx[0] ;
+
+            //printf("baseline=%f f=%f\n", baseline, f ) ;
+            //float testSum = 0 ;
+            //int cnt = 0 ;
+            for ( int i = 0 ; i < height ; i++ )
+            {
+                for ( int j = 0 ; j < width ; j++ )
+                {
+                    float d = disparity.at<float>(i, j) ;
+                    if (  d < 1.5 ) {
+                        depth1.at<float>(i, j) = 0 ;
+                    }
+                    else {
+                        depth1.at<float>(i, j) = baseline * f / d ;
+                        //                testSum += depthImage.at<float>(i, j) ;
+                        //                cnt++ ;
+                    }
+                }
+            }
+            //ROS_INFO("testNum = %f\n",  testSum/cnt ) ;
+            depthImage[0] = depth1 ;
+            for (int kk = 1; kk < maxPyramidLevel; kk++){
+                pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
+            }
+
+            slidingWindows.insertKeyFrame(grayImage, depthImage, gradientMapForDebug, R_c_0, T_c_0 );
+            cout << "currentPosition:\n" << T_c_0.transpose() << endl;
 
             R_k_c = Matrix3d::Identity();
             T_k_c = Vector3d::Zero();
@@ -412,13 +446,13 @@ void estimateCurrentState()
     imshow("image1", img1 ) ;
     cv::moveWindow("image1", 0, 0 );
     imshow("dense key points", gradientMapForDebug ) ;
-    cv::moveWindow("dense key points", 350, 0 );
+    cv::moveWindow("dense key points", 500, 0 );
 
-    if ( vst == false || (cnt % keyFrameInterval) == 1 ){
+    if ( insertKeyFrameFlag ){
         imshow("image0", img0 ) ;
-        cv::moveWindow("image0", 350, 350 );
+        cv::moveWindow("image0", 500, 500 );
         imshow("diparity", disparity/maxDisparity ) ;
-        cv::moveWindow("diparity", 0, 350 );
+        cv::moveWindow("diparity", 0, 500 );
     }
 
     imageQueue[0].pop_front();
