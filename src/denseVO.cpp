@@ -60,7 +60,8 @@ using namespace std;
 using namespace cv;
 using namespace Eigen;
 
-CAMER_PARAMETERS cameraParameters(535.4, 539.2, 320.1, 247.6);//TUM Freiburg 3 sequences
+CAMER_PARAMETERS cameraParameters ;
+//CAMER_PARAMETERS cameraParameters(535.4, 539.2, 320.1, 247.6);//TUM Freiburg 3 sequences
 //CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6,	255.3,	0.2624, -0.9531, -0.0054, 0.0026, 1.1633);
 //CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6, 255.3);//TUM Freiburg 1 sequences
 STATEESTIMATION slidingWindows(IMAGE_HEIGHT, IMAGE_WIDTH, &cameraParameters);
@@ -137,21 +138,37 @@ void initCalibrationParameters()
     Mat cameraMatrix ;
     Mat distortionCoff ;
 
-    if (fs.isOpened() == false ){
-        puts("Can not open") ;
-        return ;
-    }
+//    if (fs.isOpened() == false ){
+//        puts("Can not open") ;
+//        return ;
+//    }
 
-    fs["camera_matrix"] >> cameraMatrix ;
-    fs["distortion_coefficients"] >> distortionCoff ;
+
+    cameraMatrix = cv::Mat::zeros(3, 3, CV_32F ) ;
+    cameraMatrix.at<float>(0, 0) = 270.310139 ;
+    cameraMatrix.at<float>(0, 2) = 157.085025 ;
+    cameraMatrix.at<float>(1, 1) = 269.501236 ;
+    cameraMatrix.at<float>(1, 2) = 127.390471 ;
+    cameraMatrix.at<float>(2, 2) = 1.0 ;
+
+    distortionCoff = cv::Mat::zeros(1, 4, CV_32F ) ;
+    distortionCoff.at<float>(0, 0) = 0.030448 ;
+    distortionCoff.at<float>(0, 1) = -0.095764 ;
+    distortionCoff.at<float>(0, 2) = 0.007353999999999999 ;
+    distortionCoff.at<float>(0, 3) = 0.001485 ;
+
+//    fs["camera_matrix"] >> cameraMatrix ;
+//    fs["distortion_coefficients"] >> distortionCoff ;
 
     cameraParameters.cameraMatrix = cameraMatrix ;
     cameraParameters.setParameters(
-                cameraMatrix.at<double>(0, 0), cameraMatrix.at<double>(1, 1),
-                cameraMatrix.at<double>(0, 2), cameraMatrix.at<double>(1, 2));
+                cameraMatrix.at<float>(0, 0), cameraMatrix.at<float>(1, 1),
+                cameraMatrix.at<float>(0, 2), cameraMatrix.at<float>(1, 2));
     cameraParameters.distCoeffs = distortionCoff ;
 
-    fs.release();
+//    fs.release();
+
+
 }
 
 void pubOdometry(const Vector3d& p, const Matrix3d& R )
@@ -214,7 +231,7 @@ void estimateCurrentState()
     {
 
         cnt++ ;
-        //double t = (double)cvGetTickCount();
+        double t = (double)cvGetTickCount();
 
         if (vst == false )//the first frame
         {
@@ -275,7 +292,7 @@ void estimateCurrentState()
     #endif
         }
 
-        //printf("dense tracking time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
+        printf("dense tracking time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
 
         bufferHead++ ;
         if ( bufferHead >= bufferSize ){

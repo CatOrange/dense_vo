@@ -29,7 +29,7 @@ using namespace cv;
 using namespace Eigen;
 const int numImage = 800;
 const int groundTruthDataNum = 5000;
-char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_near\\" ;
+char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_far\\" ;
 char depthDataPath[256] ;
 char rgbDataPath[256] ;
 char rgbListPath[256] ;
@@ -385,9 +385,9 @@ void updateR_T(Vector3d& w, Vector3d& v)
 
 //testDataGenerator TDG;
 Mat rgbImage;
-Mat depthImage[maxPyramidLevel*bufferSize];
-Mat grayImage[maxPyramidLevel*bufferSize];
-int bufferHead = 0;
+Mat depthImage[maxPyramidLevel];
+Mat grayImage[maxPyramidLevel];
+Mat gradientMapForDebug;
 STATE tmpState;
 STATE* lastFrame;
 
@@ -395,16 +395,16 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
 	Matrix3d nextR = Matrix3d::Identity();
 	Vector3d nextT = Vector3d::Zero();
-	slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, bufferHead, nextR, nextT);
+	slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT);
 
 	T_k_c = nextR * T_k_c + nextT;
 	R_k_c = nextR * R_k_c;
 }
 
-void keyframeToFrameDenseTracking(int bufferHead, Matrix3d& R_k_c, Vector3d& T_k_c)
+bool keyframeToFrameDenseTracking( Matrix3d& R_k_c, Vector3d& T_k_c)
 {
 	STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-	slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, bufferHead, R_k_c, T_k_c);
+	return slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -512,6 +512,7 @@ int main()
 	//return 0;
 
 	bool vst = false;
+	bool insertKeyFrameFlag = true;
 	map<unsigned long long, int>::iterator iter;
 
 	Matrix3d R_k_c;//R_k^(k+1)
@@ -522,7 +523,6 @@ int main()
 	ofstream fileOutput("result.txt");
 	
 	init();
-	bufferHead = 0;
 	for ( int i = 1; i < numImage; i += 1 )
 	{
 		printf("id : %d\n", i);
@@ -570,7 +570,6 @@ int main()
 			pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
 			pyrDownMedianSmooth<float>(depthImage[kk - 1], depthImage[kk]);
 		}
-
 
 		//for (int x = 20; x < 30; x++){
 		//	cout << depthImage.at<float>(307, x) << endl;
@@ -620,7 +619,7 @@ int main()
 			firstFrameTtoVICON << groundTruth[timeID].tx, groundTruth[timeID].ty, groundTruth[timeID].tz;
 
 			//cout << firstFrameTtoVICON << endl;
-			slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero());
+			slidingWindows.insertKeyFrame(grayImage, depthImage, gradientMapForDebug, Matrix3d::Identity(), Vector3d::Zero());
 			slidingWindows.planeDection();
 
 			R_k_c = Matrix3d::Identity();
@@ -642,7 +641,7 @@ int main()
 #ifdef FRAME_TO_FRAME
 		frameToFrameDenseTracking(R_k_c, T_k_c);
 #else
-		keyframeToFrameDenseTracking(bufferHead, R_k_c, T_k_c);
+		insertKeyFrameFlag = keyframeToFrameDenseTracking(R_k_c, T_k_c);
 #endif
 
 		//t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
@@ -668,20 +667,24 @@ int main()
 			|| fabs(rotatedAngles(0, 1)) > angularThreshold
 			|| fabs(rotatedAngles(0, 2)) > angularThreshold
 			|| currentT.norm() > translationThreshold )*/
-		if ((i % 10) == 1)
+		if ( (i%10) == 1 )
 		{
-			//double t = (double)cvGetTickCount();
+			
 
-			slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, R_c_0, T_c_0 );
+			slidingWindows.insertKeyFrame(grayImage, depthImage, gradientMapForDebug, R_c_0, T_c_0 );
+
+			//imshow("gradientImage", gradientMapForDebug);
+			//cvMoveWindow("gradientImage", 500, 0);
 
 			cout << "estimate position[before BA]:\n" 
 				<< slidingWindows.states[slidingWindows.tail].T_k0.transpose() << endl;
 
+			double t = (double)cvGetTickCount();
 
 			slidingWindows.PhotometricBA();
 
-			//t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
-			//printf("BA cal time: %f\n", t);
+			t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
+			printf("BA cal time: %f\n", t);
 
 			slidingWindows.planeDection();
 
@@ -745,6 +748,11 @@ int main()
 		//	char c = waitKey(0);
 		//	//printf("%c\n", c);
 		//}
+
+
+		//imshow("currentImage", grayImage[0]);
+		//cvMoveWindow("currentImage", 0, 0);
+		//waitKey(1);
 	}
 	fileOutput.close();
 

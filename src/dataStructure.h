@@ -36,17 +36,17 @@ struct HEAPNODE{
 };
 
 struct GRADIENTNODE{
-  unsigned short u, v ;
-  double cost ;
-  bool operator < (const GRADIENTNODE &a)const{
-    return cost > a.cost;
-  }
-} ;
+	unsigned short u, v;
+	double cost;
+	bool operator < (const GRADIENTNODE &a)const{
+		return cost > a.cost;
+	}
+};
 
 class minHeap
 {
 public:
-	int size; 
+	int size;
 	HEAPNODE data[queueSize];
 
 	minHeap(){
@@ -132,11 +132,11 @@ public:
 		}
 		k = x;
 		while (k != r){
-			j = parent[k];        
-			parent[k] = r;        
-			k = j;                  
+			j = parent[k];
+			parent[k] = r;
+			k = j;
 		}
-		return r;    
+		return r;
 	}
 
 	void merge(int x, int y)
@@ -148,8 +148,11 @@ public:
 
 struct CAMER_PARAMETERS
 {
-	cv::Mat cameraMatrix = cv::Mat::zeros(3, 3, CV_64FC1 );
-	cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64FC1 );
+	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+	Eigen::Matrix3d Ric;
+	Eigen::Vector3d Tic;
+	cv::Mat cameraMatrix = cv::Mat::zeros(3, 3, CV_64FC1);
+	cv::Mat distCoeffs = cv::Mat::zeros(1, 5, CV_64FC1);
 	double fy[maxPyramidLevel], fx[maxPyramidLevel], cy[maxPyramidLevel], cx[maxPyramidLevel];
 
 	//CAMER_PARAMETERS(double input_fx, double input_fy, double input_cx, double input_cy )
@@ -159,7 +162,14 @@ struct CAMER_PARAMETERS
 	//	cx[0] = input_cx;
 	//	cy[0] = input_cy;
 
-	//	initPyramidParameters();
+	//#ifdef DOWNSAMPLING
+	//		fx[0] /= 2.0;
+	//		fy[0] /= 2.0;
+	//		cx[0] = (cx[0] + 0.5) / 2.0 - 0.5;
+	//		cy[0] = (cy[0] + 0.5) / 2.0 - 0.5;
+	//#endif
+
+	//initPyramidParameters();
 
 	//	cameraMatrix.at<double>(0, 0) = input_fx;
 	//	cameraMatrix.at<double>(0, 2) = input_cx;
@@ -168,6 +178,12 @@ struct CAMER_PARAMETERS
 	//	cameraMatrix.at<double>(2, 2) = 1.0;
 	//}
 	CAMER_PARAMETERS(){
+	}
+
+	void setExtrinsics(const Eigen::Matrix3d& R, const Eigen::Vector3d& T)
+	{
+		Ric = R;
+		Tic = T;
 	}
 
 	void setParameters(double input_fx, double input_fy, double input_cx, double input_cy)
@@ -186,7 +202,7 @@ struct CAMER_PARAMETERS
 		cameraMatrix.at<double>(2, 2) = 1.0;
 	}
 
-	void setDistortionCoff( double d0, double d1, double d2, double d3, double d4)
+	void setDistortionCoff(double d0, double d1, double d2, double d3, double d4)
 	{
 		distCoeffs.at<double>(0, 0) = d0;
 		distCoeffs.at<double>(0, 1) = d1;
@@ -201,8 +217,8 @@ struct CAMER_PARAMETERS
 		{
 			fx[i] = fx[i - 1] / 2.0;
 			fy[i] = fy[i - 1] / 2.0;
-			cx[i] = ( cx[i - 1] + 0.5 ) / 2.0 - 0.5;
-			cy[i] = ( cy[i - 1] + 0.5 ) / 2.0 - 0.5;
+			cx[i] = (cx[i - 1] + 0.5) / 2.0 - 0.5;
+			cy[i] = (cy[i - 1] + 0.5) / 2.0 - 0.5;
 		}
 	}
 };

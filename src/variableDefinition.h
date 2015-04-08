@@ -8,6 +8,7 @@
 
 #ifdef DOWNSAMPLING
 const int IMAGE_WIDTH = 320;
+//const int IMAGE_WIDTH = 376;
 const int IMAGE_HEIGHT = 240;
 #else
 const int IMAGE_WIDTH = 640;
@@ -36,14 +37,14 @@ const double cosThreshold = cos(10.0 / 180 * PI);
 //#define DEBUG_INSERT_SUPERPIXEL
 
 //for BA
-#define DEBUG_BA
+//#define DEBUG_BA
 const int slidingWindowSize = 10;
 const double AverageIntensityError = 80.0;
 const double invIntensityCov = 1.0 / (3.0*3.0);
 const double dxOptProportion = 0.1;
-const int maxIterationBA = 10;
+const int maxIterationBA = 5;
 const int maxPyramidLevelBA = 1;
-const double normalizedParallaxThreshold = 10.0 / 535.0;
+const double normalizedParallaxThreshold = 10.0/268 ;
 const double angularThreshold = 3.0 / 180 * PI;
 
 //const double normalizedParallaxThreshold = 1.0;
@@ -77,7 +78,7 @@ const double weightLinearVel = 1.0 / covLinearVel*10 ;
 
 //For reprojection
 const int expectedClusteringNum = 200;
-const int minOptNum = 100 * (1 << (maxPyramidLevelBA - 1) * 2);
+const int minOptNum = 800 * (1 << (maxPyramidLevelBA - 1) * 2);
 //const int minOptNum = T_NUM;
 
 /*
@@ -103,4 +104,7 @@ const int ompNumThreads = 2;
 for ros
 */
 const int bufferSize = 10 ;
+
+const int maxDisparity = 96 ;
+
 #endif
