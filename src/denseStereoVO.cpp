@@ -103,6 +103,7 @@ Vector3d T_k_c;//T_k^(k+1)
 Vector3d T_c_0;
 
 cv::StereoBM bm_( cv::StereoBM::BASIC_PRESET, maxDisparity, 21 );
+cv::StereoSGBM sgbm_(1, maxDisparity, 21 ) ;
 double lastTime = -1 ;
 
 Vector3d R_to_ypr(const Matrix3d& R)
@@ -324,7 +325,11 @@ void estimateCurrentState()
         img0.create(iter0->height, iter0->width, CV_8UC1);
         memcpy(&img0.data[0], &iter0->data[0], iter0->height*iter0->width ) ;
 
-        bm_(img1, img0, disparity, CV_32F);
+        //bm_(img1, img0, disparity, CV_32F);
+        sgbm_(img1, img0, disparity ) ;
+        disparity.convertTo( disparity, CV_32F );
+        disparity /= 16 ;
+
         int height = iter0->height ;
         int width = iter0->width ;
         depth1.create(iter0->height, iter0->width, CV_32F );

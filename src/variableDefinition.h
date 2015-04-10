@@ -7,8 +7,8 @@
 //#define SAVEVIDEO
 
 #ifdef DOWNSAMPLING
-const int IMAGE_WIDTH = 320;
-//const int IMAGE_WIDTH = 376;
+//const int IMAGE_WIDTH = 320;
+const int IMAGE_WIDTH = 376;
 const int IMAGE_HEIGHT = 240;
 #else
 const int IMAGE_WIDTH = 640;
