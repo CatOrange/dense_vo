@@ -20,14 +20,14 @@
 //using namespace std;
 using namespace cv;
 
-class kMeansClustering
+class kMeansClusteringBase
 {
 public:
-	kMeansClustering(){
+	kMeansClusteringBase(){
 		depth = NULL;
 		mask = NULL;
 	}
-	~kMeansClustering(){
+	~kMeansClusteringBase(){
 
 	}
 	double fx, fy, cx, cy;
@@ -36,8 +36,7 @@ public:
 	float* depth;
 	bool* mask;
 	bool valid[IMAGE_HEIGHT][IMAGE_WIDTH];
-	double normalMap[IMAGE_HEIGHT][IMAGE_WIDTH][3];
-	double kSeedNormal[maxKMeansNum][3];
+
 	int kSeedX[maxKMeansNum];
 	int kSeedY[maxKMeansNum];
 	int labels[IMAGE_HEIGHT][IMAGE_WIDTH];
@@ -61,6 +60,14 @@ public:
 	void setMask(bool* maskMap){
 		mask = maskMap;
 	}
+};
+
+/*
+class kMeansClusteringNormalSpace : public kMeansClusteringBase
+{
+public:
+	double normalMap[IMAGE_HEIGHT][IMAGE_WIDTH][3];
+	double kSeedNormal[maxKMeansNum][3];
 
 	inline void crossProduct(double* u, double* v, double* output)
 	{
@@ -96,7 +103,7 @@ public:
 		{
 			for (int j = 1; j < mm; j++)
 			{
-				if (depth[i*m + j] < zeroThreshold || mask[INDEX(i, j, n, m)] == false ){
+				if (depth[i*m + j] < zeroThreshold || mask[INDEX(i, j, n, m)] == false){
 					valid[i][j] = false;
 					continue;
 				}
@@ -106,7 +113,7 @@ public:
 				{
 					ty = dy[k] + i;
 					tx = dx[k] + j;
-					if (depth[ty*m + tx] < zeroThreshold ){
+					if (depth[ty*m + tx] < zeroThreshold){
 						flag = false;
 					}
 				}
@@ -242,7 +249,7 @@ public:
 
 	void runClustering(int K, int iterNum)
 	{
-    //double t = (double)cvGetTickCount();
+		//double t = (double)cvGetTickCount();
 
 		initNormalMap();
 		initSeeds(K);
@@ -376,12 +383,12 @@ public:
 					}
 					if (nlabels[ty][tx] > 0){
 						adjlabel = nlabels[ty][tx];
-						break ;
+						break;
 					}
 				}
 				nlabels[i][j] = labelNum;
 				numOfEachLabels[labelNum] = 1;
-				kSeedNormal[labelNum][0] = normalMap[i][j][0] ;
+				kSeedNormal[labelNum][0] = normalMap[i][j][0];
 				kSeedNormal[labelNum][1] = normalMap[i][j][1];
 				kSeedNormal[labelNum][2] = normalMap[i][j][2];
 
@@ -436,7 +443,7 @@ public:
 			}
 		}
 
-		seedsNum = labelNum-1 ;
+		seedsNum = labelNum - 1;
 		memcpy(labels, nlabels, sizeof(labels));
 		for (int i = 1; i <= seedsNum; i++)
 		{
@@ -447,6 +454,303 @@ public:
 
 	}
 
+};
+*/
+
+class kMeansClusteringDepthSpace : public kMeansClusteringBase
+{
+public:
+	double kSeedDepth[maxKMeansNum];
+
+	void initMap()
+	{
+		if (depth == NULL){
+			puts("error! Depth map does not exist!");
+			return;
+		}
+
+		for (int i = 0; i < n; i++)
+		{
+			for (int j = 0; j < m; j++)
+			{
+				if (depth[i*m + j] < zeroThreshold || mask[INDEX(i, j, n, m)] == false){
+					valid[i][j] = false;
+					continue;
+				}
+				else {
+					valid[i][j] = true;
+				}
+			}
+		}
+	}
+
+	void initSeeds(int K)
+	{
+		double step = sqrt(double(n*m) / double(K));
+		int xoff = int(step / 2);
+		int yoff = int(step / 2);
+
+		int r = 0;
+		seedsNum = 0;
+		for (int y = 0; y < n; y++)
+		{
+			int Y = int(y*step + yoff);
+			if (Y >= n) break;
+
+			for (int x = 0; x < m; x++)
+			{
+				//int X = x*step + xoff;//square grid
+				int X = int(x*step) + (xoff << (r & 0x1));//hex grid
+				if (X >= m) break;
+				bool flag = false;
+				double minGradient = DBL_MAX;
+				int minX = -1;
+				int minY = -1;
+				if (valid[Y][X] == true)
+				{
+					minY = Y;
+					minX = X;
+					flag = true;
+
+					if (valid[Y - 1][X] && valid[Y + 1][X] && valid[Y][X + 1] && valid[Y][X - 1]){
+						minGradient = fabs( 0.5*(depth[ INDEX(Y - 1,X, n,m) ] - depth[ INDEX(Y + 1, X, n, m) ] ) ) 
+							+ fabs( 0.5*( depth[ INDEX(Y,X + 1, n, m)] - depth[INDEX(Y, X - 1, n, m)] ) );
+					}
+					else {
+						minGradient = DBL_MAX;
+					}
+				}
+				for (int k = 0; k < 8; k++)
+				{
+					int ty = Y + dy8[k];
+					int tx = X + dx8[k];
+					if (valid[ty][tx] == false){
+						continue;
+					}
+
+					if (valid[ty - 1][tx] && valid[ty + 1][tx] && valid[ty][tx + 1] && valid[ty][tx - 1])
+					{
+						double tmpGradient = fabs( 0.5*(depth[INDEX(ty - 1, tx, n, m)] - depth[INDEX(ty + 1, tx, n, m)] ) )
+							+ fabs(0.5*(depth[ INDEX(ty,tx + 1, n, m)] - depth[ INDEX(ty, tx - 1, n, m) ] ) );
+						if (tmpGradient < minGradient)
+						{
+							minGradient = tmpGradient;
+							minY = ty;
+							minX = tx;
+						}
+						flag = true;
+					}
+				}
+				if (flag == true)
+				{
+					kSeedDepth[seedsNum] = depth[ INDEX(minY, minX, n, m) ];
+					kSeedY[seedsNum] = minY;
+					kSeedX[seedsNum] = minX;
+					seedsNum++;
+				}
+			}
+			r++;
+		}
+	}
+
+	void runClustering(int K, int iterNum)
+	{
+		//double t = (double)cvGetTickCount();
+
+		initMap();
+		initSeeds(K);
+
+		//printf("n=%d m=%d\n", n, m) ;
+
+		int STEP = (int)sqrt(double(n*m) / double(K));
+		int offset = STEP;
+		double invxywt = 1.0 / (STEP*STEP);
+		vector<double>sigmaDepth(seedsNum);
+		vector<double>sigmaX(seedsNum);
+		vector<double>sigmaY(seedsNum);
+		vector<int> clusterSize(seedsNum, 1);
+		vector<double> maxColorDist(seedsNum, 10 * 10);
+		vector<vector <double> > distTotal(n, vector<double>(m));
+
+		//vector<vector <double> > distXY(n, vector<double>(m));
+		while (iterNum--)
+		{
+			for (int i = 0; i < n; i++){
+				distTotal[i].assign(m, DBL_MAX);
+			}
+			for (int i = 0; i < seedsNum; i++)
+			{
+				if (clusterSize[i] == 0) continue;
+
+				int leftTopY = max(0, kSeedY[i] - offset);
+				int leftTopX = max(0, kSeedX[i] - offset);
+				int rightDownY = min(n - 1, kSeedY[i] + offset);
+				int rightDownX = min(m - 1, kSeedX[i] + offset);
+				for (int y = leftTopY; y <= rightDownY; y++)
+				{
+					for (int x = leftTopX; x <= rightDownX; x++)
+					{
+						if (valid[y][x] == false){
+							//labels[y][x] = -1;
+							continue;
+						}
+						double dist = 0;
+						dist += SQ(depth[INDEX(y, x, n, m)] - kSeedDepth[i]) / maxColorDist[i];
+
+#ifdef REGULARITY
+						dist += (SQ(double(y - kSeedY[i])) + SQ(double(x - kSeedX[i]))) *  invxywt;
+#endif
+
+						if (dist < distTotal[y][x]){
+							distTotal[y][x] = dist;
+							labels[y][x] = i;
+						}
+					}
+				}
+			}
+
+			for (int i = 0; i < seedsNum; i++)
+			{
+				sigmaDepth[i] = 0;
+				sigmaX[i] = 0;
+				sigmaY[i] = 0;
+				clusterSize[i] = 0;
+				maxColorDist[i] = 1;
+			}
+
+
+			for (int i = 0; i < n; i++)
+			{
+				for (int j = 0; j < m; j++)
+				{
+					if (valid[i][j] == false || distTotal[i][j] == DBL_MAX){
+						continue;
+					}
+					int k = labels[i][j];
+					sigmaDepth[k] += depth[ INDEX(i, j, n, m) ];
+					sigmaY[k] += i;
+					sigmaX[k] += j;
+					clusterSize[k]++;
+
+					double colorDist = SQ(depth[INDEX(i, j, n, m)] - kSeedDepth[k]);
+					if (colorDist > maxColorDist[k]){
+						maxColorDist[k] = colorDist;
+					}
+				}
+			}
+
+			for (int i = 0; i < seedsNum; i++)
+			{
+				if (clusterSize[i] == 0) {
+					continue;
+				}
+				kSeedDepth[i] = sigmaDepth[i] / clusterSize[i];
+				kSeedY[i] = int(double(sigmaY[i]) / (double)clusterSize[i]);
+				kSeedX[i] = int(double(sigmaX[i]) / (double)clusterSize[i]);
+			}
+		}
+
+		//EnforceLabelConnectivity(K);
+	}
+
+	void EnforceLabelConnectivity(int K)
+	{
+		const int sz = n*m;
+		const int SUPSZ = (sz / K) >> 3;
+		//nlabels.resize(sz, -1);
+		memset(nlabels, -1, sizeof(nlabels));
+		memset(numOfEachLabels, 0, sizeof(numOfEachLabels));
+		//for (int i = 0; i < n; i++){
+		//	for (int j = 0; j < m; j++){
+		//		nlabels[i][j] = -1;
+		//	}
+		//}
+
+		int labelNum = 1;
+		vector<int>Qx(sz);
+		vector<int>Qy(sz);
+
+		int adjlabel = 0;//adjacent label
+		for (int i = 0; i < n; i++)
+		{
+			for (int j = 0; j < m; j++)
+			{
+				if (valid[i][j] == false) {
+					nlabels[i][j] = 0;
+					continue;
+				}
+				if (nlabels[i][j] > 0) {
+					continue;
+				}
+				for (int k = 0; k < 4; k++)
+				{
+					int ty = i + dy[k];
+					int tx = j + dx[k];
+					if (ty < 0 || ty >= n || tx < 0 || tx >= m || valid[ty][tx] == false){
+						continue;
+					}
+					if (nlabels[ty][tx] > 0){
+						adjlabel = nlabels[ty][tx];
+						break;
+					}
+				}
+				nlabels[i][j] = labelNum;
+				numOfEachLabels[labelNum] = 1;
+				kSeedDepth[labelNum] = depth[ INDEX(i, j, n, m) ];
+
+				int head = 0, tail = 1;
+				Qy[0] = i;
+				Qx[0] = j;
+				while (head < tail)
+				{
+					int y = Qy[head];
+					int x = Qx[head];
+					head++;
+					for (int k = 0; k < 4; k++)
+					{
+						int ty = y + dy[k];
+						int tx = x + dx[k];
+						if (ty < 0 || ty >= n || tx < 0 || tx >= m || valid[ty][tx] == false){
+							continue;
+						}
+						if (nlabels[ty][tx] < 0 && labels[ty][tx] == labels[y][x]){
+							nlabels[ty][tx] = labelNum;
+							numOfEachLabels[labelNum]++;
+							kSeedDepth[labelNum] += depth[ INDEX(ty,tx, n,m) ];
+
+							Qx[tail] = tx;
+							Qy[tail] = ty;
+							tail++;
+						}
+					}
+				}
+
+				if (tail > SUPSZ){
+					labelNum++;
+				}
+				else
+				{
+					head = 0;
+					while (head < tail)
+					{
+						int y = Qy[head];
+						int x = Qx[head];
+						head++;
+
+						nlabels[y][x] = adjlabel;
+						numOfEachLabels[adjlabel]++;
+						kSeedDepth[adjlabel] += depth[ INDEX(y,x,n,m) ]  ;
+					}
+				}
+			}
+		}
+
+		seedsNum = labelNum - 1;
+		memcpy(labels, nlabels, sizeof(labels));
+		for (int i = 1; i <= seedsNum; i++){
+			kSeedDepth[i] /= numOfEachLabels[i];
+		}
+	}
 };
 
 #endif
