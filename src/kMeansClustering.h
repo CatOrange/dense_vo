@@ -527,7 +527,6 @@ public:
 					if (valid[ty][tx] == false){
 						continue;
 					}
-
 					if (valid[ty - 1][tx] && valid[ty + 1][tx] && valid[ty][tx + 1] && valid[ty][tx - 1])
 					{
 						double tmpGradient = fabs( 0.5*(depth[INDEX(ty - 1, tx, n, m)] - depth[INDEX(ty + 1, tx, n, m)] ) )
@@ -537,8 +536,8 @@ public:
 							minGradient = tmpGradient;
 							minY = ty;
 							minX = tx;
+							flag = true;
 						}
-						flag = true;
 					}
 				}
 				if (flag == true)
@@ -561,6 +560,11 @@ public:
 		initSeeds(K);
 
 		//printf("n=%d m=%d\n", n, m) ;
+
+		//Mat debug(n, m, CV_32F);
+		//memcpy(debug.data, depth, sizeof(float)*n*m);
+		//imshow("debug", debug/255);
+		//waitKey(0);
 
 		int STEP = (int)sqrt(double(n*m) / double(K));
 		int offset = STEP;
@@ -618,7 +622,6 @@ public:
 				maxColorDist[i] = 1;
 			}
 
-
 			for (int i = 0; i < n; i++)
 			{
 				for (int j = 0; j < m; j++)
@@ -631,6 +634,27 @@ public:
 					sigmaY[k] += i;
 					sigmaX[k] += j;
 					clusterSize[k]++;
+				}
+			}
+
+			for (int i = 0; i < seedsNum; i++)
+			{
+				if (clusterSize[i] == 0) {
+					clusterSize[i] = 1;
+				}
+				kSeedDepth[i] = sigmaDepth[i] / clusterSize[i];
+				kSeedY[i] = int(double(sigmaY[i]) / (double)clusterSize[i]);
+				kSeedX[i] = int(double(sigmaX[i]) / (double)clusterSize[i]);
+			}
+
+			for (int i = 0; i < n; i++)
+			{
+				for (int j = 0; j < m; j++)
+				{
+					if (valid[i][j] == false || distTotal[i][j] == DBL_MAX){
+						continue;
+					}
+					int k = labels[i][j];
 
 					double colorDist = SQ(depth[INDEX(i, j, n, m)] - kSeedDepth[k]);
 					if (colorDist > maxColorDist[k]){
@@ -638,19 +662,9 @@ public:
 					}
 				}
 			}
-
-			for (int i = 0; i < seedsNum; i++)
-			{
-				if (clusterSize[i] == 0) {
-					continue;
-				}
-				kSeedDepth[i] = sigmaDepth[i] / clusterSize[i];
-				kSeedY[i] = int(double(sigmaY[i]) / (double)clusterSize[i]);
-				kSeedX[i] = int(double(sigmaX[i]) / (double)clusterSize[i]);
-			}
 		}
 
-		//EnforceLabelConnectivity(K);
+		EnforceLabelConnectivity(K);
 	}
 
 	void EnforceLabelConnectivity(int K)

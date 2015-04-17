@@ -535,40 +535,75 @@ void testFun()
 kMeansClusteringDepthSpace clusteringDepth;
 bool mask[320*240];
 float depthMap[320 * 240];
+int K = 50;
+int iterNum = 0;
+Mat out;
+RNG rng(100);
+vector<uchar>R;
+vector<uchar>G;
+vector<uchar>B;
+vector<MatrixXd>A;
+vector<VectorXd>b;
+MatrixXd coefficients;
+vector<int>cntPoints;
+Mat intepolationImage;
 
-void testFun2()
+
+void fitting(int, void *)
 {
-	Mat src = imread("D:\\depth image\\DS.png");
-	imshow("src", src);
+	if (K == 0){
+		return;
+	}
 
-	src.convertTo(src, CV_32F);
-	//src /= 255.0;
-	
-	memset(mask, true, sizeof(mask));
+	double t = (double)cvGetTickCount();
+
 	int rows = 240;
 	int cols = 320;
-	int K = 50;
-	int iterNum = 10;
-	Mat out(rows, cols, CV_8UC3);
 
-	clusteringDepth.setCameraParameters(rows, cols, 0, 0, 0, 0);
-	clusteringDepth.setMask( &mask[0] );
-	memcpy(depthMap, (float*)src.data, rows*cols*sizeof(float));
-	clusteringDepth.setInputData( depthMap );
-	clusteringDepth.runClustering(K, 1);
+	
+	clusteringDepth.runClustering(K, iterNum);
 
 	int currentNumOfSuperpixel = clusteringDepth.seedsNum;
 	printf("currentNumOfSuperpixel = %d\n", currentNumOfSuperpixel);
 
-	RNG rng(100);
-	vector<uchar>R(currentNumOfSuperpixel);
-	vector<uchar>G(currentNumOfSuperpixel);
-	vector<uchar>B(currentNumOfSuperpixel);
+	R.clear();
+	G.clear();
+	B.clear();
 	for (int i = 0; i < currentNumOfSuperpixel; i++){
-		R[i] = rng.uniform(0, 255);
-		G[i] = rng.uniform(0, 255);
-		B[i] = rng.uniform(0, 255);
+		R.push_back( rng.uniform(0, 255) );
+		G.push_back( rng.uniform(0, 255) );
+		B.push_back( rng.uniform(0, 255) );
 	}
+
+	//puts("tobe ");
+
+	//init matrix size
+	A.clear();
+	b.clear();
+	cntPoints.clear();
+
+#ifdef BILINEAR
+	coefficients.resize(4, currentNumOfSuperpixel);
+#else
+	coefficients.resize(6, currentNumOfSuperpixel);
+#endif
+
+	for (int i = 0; i < currentNumOfSuperpixel; i++)
+	{
+
+#ifdef BILINEAR
+		A.push_back( MatrixXd(clusteringDepth.numOfEachLabels[i + 1], 4) );
+#else
+		A.push_back( MatrixXd(clusteringDepth.numOfEachLabels[i + 1], 6) );
+#endif
+
+		b.push_back(  VectorXd(clusteringDepth.numOfEachLabels[i + 1]) ) ;
+		cntPoints.push_back( 0 );
+	}
+
+	//puts("tobe2 ");
+	cvtColor(src, out, CV_GRAY2RGB );
+	double prop = 0.7;
 	for (int i = 0; i < rows; i++)
 	{
 		for (int j = 0; j < cols; j++)
@@ -577,15 +612,139 @@ void testFun2()
 				continue;
 			}
 			int id = clusteringDepth.labels[i][j] - 1;
-			out.at<cv::Vec3b>(i, j)[0] = R[id] ;
-			out.at<cv::Vec3b>(i, j)[1] =  G[id] ;
-			out.at<cv::Vec3b>(i, j)[2] = B[id] ;
+			out.at<cv::Vec3b>(i, j)[0] = out.at<cv::Vec3b>(i, j)[0]*prop + R[id] * (1-prop);
+			out.at<cv::Vec3b>(i, j)[1] = out.at<cv::Vec3b>(i, j)[1] * prop + G[id] * (1 - prop);
+			out.at<cv::Vec3b>(i, j)[2] = out.at<cv::Vec3b>(i, j)[2] * prop + B[id] * (1 - prop);
+
+			A[id](cntPoints[id], 0) = 1.0;
+			A[id](cntPoints[id], 1) = j;
+			A[id](cntPoints[id], 2) = i;
+			A[id](cntPoints[id], 3) = i*j;
+
+#ifdef BILINEAR
+#else
+			A[id](cntPoints[id], 4) = j*j ;
+			A[id](cntPoints[id], 5) = i*i ;
+#endif
+
+			b[id](cntPoints[id]) = depthMap[INDEX(i, j, rows, cols)];
+			cntPoints[id]++;
 		}
 	}
 
-	
+	//puts("tobe3 ");
+
+	MatrixXd AT;
+	MatrixXd ATA ;
+	LLT<MatrixXd> lltATA ;
+
+	for (int i = 0; i < currentNumOfSuperpixel; i++)
+	{
+		AT = A[i].transpose();
+		ATA = AT * A[i];
+		lltATA = ATA.llt();
+
+		ComputationInfo info = lltATA.info();
+		//printf("actual num = %d total errors=%f\n", actualNum, totalError)
+		if (info == Success){
+			VectorXd tt = lltATA.solve(AT*b[i]);
+
+#ifdef BILINEAR
+			coefficients.block(0, i, 4, 1) = tt;
+#else
+			coefficients.block(0, i, 6, 1) = tt;
+#endif
+		}
+		else{
+#ifdef BILINEAR
+			coefficients.block(0, i, 4, 1) = Vector4d::Zero();
+#else
+			coefficients.block(0, i, 6, 1) = VectorXd::Zero(6);
+#endif
+			puts("fitting fail!");
+		}
+	}
+
+	//puts("tobe4 ");
+	for (int i = 0; i < rows; i++)
+	{
+		for (int j = 0; j < cols; j++)
+		{
+			if (clusteringDepth.labels[i][j] < 1){
+				continue;
+			}
+			int id = clusteringDepth.labels[i][j] - 1;
+#ifdef BILINEAR
+			Vector4d tt;
+			tt << 1.0, j, i, i*j;
+			MatrixXd re = tt.transpose() * coefficients.block(0, id, 4, 1);
+#else
+			VectorXd tt(6);
+			tt << 1.0, j, i, i*j, j*j, i*i ;
+			MatrixXd re = tt.transpose() * coefficients.block(0, id, 6, 1);
+#endif
+
+			double d = re(0,0);
+
+			intepolationImage.at<uchar>(i, j) = (uchar)d;
+		}
+	}
+	imshow("intepolationImage", intepolationImage);
+
+	//puts("tobe 5");
+
+	//display centers
+	for (int i = 0; i < currentNumOfSuperpixel; i++)
+	{
+		int y = clusteringDepth.kSeedY[i];
+		int x = clusteringDepth.kSeedX[i];
+		circle(out, Point(x, y), 2, Scalar(0, 0, 0));
+	}
+
 	imshow("out", out);
+
+	t = ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000);
+	printf("cal time: %f\n", t);
+}
+
+void testFun2()
+{
+	namedWindow("changing_K", WINDOW_AUTOSIZE);
+	
+	src = imread("D:\\depth image\\rpy_DS.png");
+	out = src.clone();
+	
+	cvtColor(src, src, CV_RGB2GRAY);
+	intepolationImage = src.clone();
+
+	imshow("src", src);
+
+	Mat src2;
+
+	src.convertTo(src2, CV_32F);
+	//src /= 255.0;
+
+	memset(mask, true, sizeof(mask));
+	int rows = 240;
+	int cols = 320;
+
+	//printf("%d %d\n", src.rows, src.cols);
+
+	clusteringDepth.setCameraParameters(rows, cols, 0, 0, 0, 0);
+	clusteringDepth.setMask(&mask[0]);
+	memcpy(depthMap, (float*)src2.data, rows*cols*sizeof(float));
+	clusteringDepth.setInputData(depthMap);
+
+	createTrackbar("trackerBar", "changing_K", &K, 500, fitting );
+	createTrackbar("trackerBar2", "changing_K", &iterNum, 20, fitting);
+
+	imshow("out", out);
+	imshow("src", src);
+	imshow("intepolationImage", intepolationImage);
+
 	cv::waitKey(0);
+
+	return;
 }
 
 
