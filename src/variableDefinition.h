@@ -107,6 +107,6 @@ const int bufferSize = 10 ;
 
 const int maxDisparity = 96 ;
 
-#define BILINEAR
+#define MODEL_ORDER 3
 
 #endif

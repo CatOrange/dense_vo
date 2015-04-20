@@ -536,18 +536,22 @@ kMeansClusteringDepthSpace clusteringDepth;
 bool mask[320*240];
 float depthMap[320 * 240];
 int K = 50;
-int iterNum = 0;
+int iterNum = 2;
 Mat out;
 RNG rng(100);
 vector<uchar>R;
 vector<uchar>G;
 vector<uchar>B;
-vector<MatrixXd>A;
-vector<VectorXd>b;
-MatrixXd coefficients;
+Vector<LOCAL_SURFACE>localSurface;
+bool vst[240][320];
+//vector<MatrixXd>A;
+//vector<VectorXd>b;
+//MatrixXd coefficients;
 vector<int>cntPoints;
 Mat intepolationImage;
-
+Mat intepolationWithConstrain;
+Mat depthGradientMap;
+int priorWeight = 10 ;
 
 void fitting(int, void *)
 {
@@ -575,34 +579,25 @@ void fitting(int, void *)
 		B.push_back( rng.uniform(0, 255) );
 	}
 
-	//puts("tobe ");
-
 	//init matrix size
-	A.clear();
-	b.clear();
 	cntPoints.clear();
-
-#ifdef BILINEAR
-	coefficients.resize(4, currentNumOfSuperpixel);
-#else
-	coefficients.resize(6, currentNumOfSuperpixel);
-#endif
-
+	cntPoints.resize(currentNumOfSuperpixel);
+	localSurface.clear();
+	localSurface.resize( currentNumOfSuperpixel ) ;
 	for (int i = 0; i < currentNumOfSuperpixel; i++)
 	{
-
-#ifdef BILINEAR
-		A.push_back( MatrixXd(clusteringDepth.numOfEachLabels[i + 1], 4) );
-#else
-		A.push_back( MatrixXd(clusteringDepth.numOfEachLabels[i + 1], 6) );
-#endif
-
-		b.push_back(  VectorXd(clusteringDepth.numOfEachLabels[i + 1]) ) ;
-		cntPoints.push_back( 0 );
+		localSurface[i].neigbourList.clear();
+		localSurface[i].listOfU.clear();
+		localSurface[i].listOfU.reserve( clusteringDepth.numOfEachLabels[i + 1] );
+		localSurface[i].listOfV.clear();
+		localSurface[i].listOfV.reserve( clusteringDepth.numOfEachLabels[i + 1] );
+		localSurface[i].b.resize( clusteringDepth.numOfEachLabels[i + 1] );
+		localSurface[i].num = clusteringDepth.numOfEachLabels[i + 1];
+		cntPoints[i] =  0 ;
 	}
 
-	//puts("tobe2 ");
-	cvtColor(src, out, CV_GRAY2RGB );
+	//cntPoints.assign(cntPoints.size(), 0);
+	cvtColor(src, out, CV_GRAY2RGB);
 	double prop = 0.7;
 	for (int i = 0; i < rows; i++)
 	{
@@ -612,60 +607,167 @@ void fitting(int, void *)
 				continue;
 			}
 			int id = clusteringDepth.labels[i][j] - 1;
-			out.at<cv::Vec3b>(i, j)[0] = out.at<cv::Vec3b>(i, j)[0]*prop + R[id] * (1-prop);
+
+			out.at<cv::Vec3b>(i, j)[0] = out.at<cv::Vec3b>(i, j)[0] * prop + R[id] * (1 - prop);
 			out.at<cv::Vec3b>(i, j)[1] = out.at<cv::Vec3b>(i, j)[1] * prop + G[id] * (1 - prop);
 			out.at<cv::Vec3b>(i, j)[2] = out.at<cv::Vec3b>(i, j)[2] * prop + B[id] * (1 - prop);
 
-			A[id](cntPoints[id], 0) = 1.0;
-			A[id](cntPoints[id], 1) = j;
-			A[id](cntPoints[id], 2) = i;
-			A[id](cntPoints[id], 3) = i*j;
-
-#ifdef BILINEAR
-#else
-			A[id](cntPoints[id], 4) = j*j ;
-			A[id](cntPoints[id], 5) = i*i ;
-#endif
-
-			b[id](cntPoints[id]) = depthMap[INDEX(i, j, rows, cols)];
+			localSurface[id].listOfU.push_back(i);
+			localSurface[id].listOfV.push_back(j);
+			localSurface[id].b(cntPoints[id]) = depthMap[INDEX(i, j, rows, cols)];
 			cntPoints[id]++;
 		}
 	}
 
-	//puts("tobe3 ");
-
-	MatrixXd AT;
-	MatrixXd ATA ;
-	LLT<MatrixXd> lltATA ;
-
-	for (int i = 0; i < currentNumOfSuperpixel; i++)
+	memset(vst, false, sizeof(vst));
+	int stackTop;
+	vector<int>stack(rows*cols);
+	for (int i = 0; i < rows; i++)
 	{
-		AT = A[i].transpose();
-		ATA = AT * A[i];
-		lltATA = ATA.llt();
-
-		ComputationInfo info = lltATA.info();
-		//printf("actual num = %d total errors=%f\n", actualNum, totalError)
-		if (info == Success){
-			VectorXd tt = lltATA.solve(AT*b[i]);
-
-#ifdef BILINEAR
-			coefficients.block(0, i, 4, 1) = tt;
-#else
-			coefficients.block(0, i, 6, 1) = tt;
-#endif
-		}
-		else{
-#ifdef BILINEAR
-			coefficients.block(0, i, 4, 1) = Vector4d::Zero();
-#else
-			coefficients.block(0, i, 6, 1) = VectorXd::Zero(6);
-#endif
-			puts("fitting fail!");
+		for (int j = 0; j < cols; j++)
+		{
+			if (clusteringDepth.labels[i][j] < 1){
+				continue;
+			}
+			if (vst[i][j] == true){
+				continue;
+			}
+			int id = clusteringDepth.labels[i][j] - 1;
+			stackTop = 0;
+			stack[stackTop++] = (i << 16) | j;
+			while (stackTop > 0)
+			{
+				stackTop--;
+				int currentY = stack[stackTop] >> 16;
+				int currentX = stack[stackTop] & 0xffff;
+				if (vst[currentY][currentX] == true){
+					continue;
+				}
+				vst[currentY][currentX] = true;
+				for (int k = 0; k < 8; k++)
+				{
+					int ty = currentY + dy8[k];
+					int tx = currentX + dx8[k];
+					if (ty < 0 || ty >= rows || tx < 0 || tx >= cols){
+						continue;
+					}
+					if (vst[ty][tx] == true){
+						continue;
+					}
+					if (clusteringDepth.labels[ty][tx] < 1){
+						continue;
+					}
+					int tmpID = clusteringDepth.labels[ty][tx] - 1;
+					if (tmpID == id){
+						stack[stackTop++] = (ty << 16) | tx;
+					}
+					else {
+						NEIGBOURHOOD tt;
+						tt.u = ty;
+						tt.v = tx;
+						tt.linkID = tmpID;
+						localSurface[id].neigbourList.push_back(tt);
+					}
+				}
+			}
 		}
 	}
 
-	//puts("tobe4 ");
+	Mat debugMap;
+	cvtColor(src, debugMap, CV_GRAY2BGR );
+	for (int id = 0; id < currentNumOfSuperpixel; id++)
+	{
+		int numOfNeigbourList = localSurface[id].neigbourList.size();
+		for (int i = 0; i < numOfNeigbourList; i++)
+		{
+			int u = localSurface[id].neigbourList[i].u;
+			int v = localSurface[id].neigbourList[i].v;
+			
+			debugMap.at<cv::Vec3b>(u, v)(0) = 0;
+			debugMap.at<cv::Vec3b>(u, v)(1) = 255;
+			debugMap.at<cv::Vec3b>(u, v)(2) = 0;
+		}
+	}
+
+	imshow("debugMap", debugMap);
+
+	//with constrain
+	intepolationWithConstrain = src.clone();
+	MatrixXd constrainATA = MatrixXd::Zero(currentNumOfSuperpixel * 3, currentNumOfSuperpixel*3 );
+	VectorXd constrainB = VectorXd::Zero(currentNumOfSuperpixel * 3);
+	vector<int> idList;
+
+	//fitting the surface
+	MatrixXd AT;
+	MatrixXd ATA;
+	LLT<MatrixXd> lltATA;
+	ComputationInfo info;
+	for (int id = 0; id < currentNumOfSuperpixel; id++)
+	{
+		int numOfPixels = localSurface[id].num;
+		localSurface[id].A.resize(numOfPixels, MODEL_ORDER);
+		for (int i = 0; i < numOfPixels; i++)
+		{
+			int y = localSurface[id].listOfU[i];
+			int x = localSurface[id].listOfV[i];
+			localSurface[id].A(i, 0) = 1.0 ;
+			localSurface[id].A(i, 1) = x;
+			localSurface[id].A(i, 2) = y;
+			if (MODEL_ORDER > 3){
+				localSurface[id].A(i, 3) = y*x;
+			}
+		}
+		AT = localSurface[id].A.transpose() ;
+		ATA = AT*localSurface[id].A;
+		lltATA = ATA.llt();
+		info = lltATA.info();
+		if (info == Success){
+			localSurface[id].coefficients = lltATA.solve(AT* localSurface[id].b);
+		}
+		else{
+			localSurface[id].coefficients = VectorXd::Zero(MODEL_ORDER);
+			puts("fitting fail!");
+		}
+
+		//construct constrain ATA
+		constrainATA.block(id * MODEL_ORDER, id * MODEL_ORDER, MODEL_ORDER, MODEL_ORDER) += ATA;
+		constrainB.segment(id * MODEL_ORDER, MODEL_ORDER) += AT* localSurface[id].b;
+		int numOfNeigbourList = localSurface[id].neigbourList.size();
+		//idList.clear();
+		//idList.push_back(id);
+		for (int i = 0; i < numOfNeigbourList; i++)
+		{
+			int u = localSurface[id].neigbourList[i].u;
+			int v = localSurface[id].neigbourList[i].v;
+			int linkID = localSurface[id].neigbourList[i].linkID;
+			if ( depthGradientMap.at<float>(u, v) < 5)
+			{
+				if (MODEL_ORDER == 3)
+				{
+					constrainATA(id * MODEL_ORDER + 1, id * MODEL_ORDER + 1) += priorWeight;
+					constrainATA(id * MODEL_ORDER + 1, linkID * MODEL_ORDER + 1) -= priorWeight;
+					constrainATA(linkID * MODEL_ORDER + 1, id * MODEL_ORDER + 1) -= priorWeight;
+					constrainATA(linkID * MODEL_ORDER + 1, linkID * MODEL_ORDER + 1) += priorWeight;
+
+					constrainATA(id * MODEL_ORDER + 2, id * MODEL_ORDER + 2) += priorWeight;
+					constrainATA(id * MODEL_ORDER + 2, linkID * MODEL_ORDER + 2) -= priorWeight;
+					constrainATA(linkID * MODEL_ORDER + 2, id *MODEL_ORDER + 2) -= priorWeight;
+					constrainATA(linkID * MODEL_ORDER + 2, linkID * MODEL_ORDER + 2) += priorWeight;
+				}
+				else if (MODEL_ORDER == 4)
+				{
+
+				}
+			}
+		}
+	}
+
+	LLT<MatrixXd> lltConstrainATA = constrainATA.llt();
+	if (lltConstrainATA.info() != Success){
+		puts("fail");
+	}
+	VectorXd coefficients = lltConstrainATA.solve(constrainB);
+
 	for (int i = 0; i < rows; i++)
 	{
 		for (int j = 0; j < cols; j++)
@@ -674,24 +776,25 @@ void fitting(int, void *)
 				continue;
 			}
 			int id = clusteringDepth.labels[i][j] - 1;
-#ifdef BILINEAR
-			Vector4d tt;
-			tt << 1.0, j, i, i*j;
-			MatrixXd re = tt.transpose() * coefficients.block(0, id, 4, 1);
-#else
-			VectorXd tt(6);
-			tt << 1.0, j, i, i*j, j*j, i*i ;
-			MatrixXd re = tt.transpose() * coefficients.block(0, id, 6, 1);
-#endif
 
-			double d = re(0,0);
-
+			VectorXd tt(MODEL_ORDER);
+			tt(0) = 1.0;
+			tt(1) = j;
+			tt(2) = i;
+			if (MODEL_ORDER > 3){
+				tt(3) = j*i;
+			}
+			double d = tt.transpose() * localSurface[id].coefficients;
 			intepolationImage.at<uchar>(i, j) = (uchar)d;
+
+			double d2 = tt.transpose() *coefficients.segment(id * MODEL_ORDER, MODEL_ORDER);
+			intepolationWithConstrain.at<uchar>(i, j) = (uchar)d2;
 		}
 	}
 	imshow("intepolationImage", intepolationImage);
+	imshow("intepolationWithConstrain", intepolationWithConstrain);
 
-	//puts("tobe 5");
+	
 
 	//display centers
 	for (int i = 0; i < currentNumOfSuperpixel; i++)
@@ -713,11 +816,28 @@ void testFun2()
 	
 	src = imread("D:\\depth image\\rpy_DS.png");
 	out = src.clone();
-	
+
 	cvtColor(src, src, CV_RGB2GRAY);
 	intepolationImage = src.clone();
 
 	imshow("src", src);
+
+	Scharr(src, depthGradientMap, CV_32F, 1, 0);
+	depthGradientMap /= 32;
+
+	//int y = 51;
+	//int x = 51;
+	//for (int i = -1; i <= 1; i++)
+	//{
+	//	for (int j = -1; j <= 1; j++)
+	//	{
+	//		int ty = y + i;
+	//		int tx = x + j;
+	//		printf("%d ", src.at<uchar>(ty, tx) );
+	//	}
+	//	cout << endl;
+	//}
+	//cout << depthGradientMap.at<float>(y, x);
 
 	Mat src2;
 
@@ -735,8 +855,9 @@ void testFun2()
 	memcpy(depthMap, (float*)src2.data, rows*cols*sizeof(float));
 	clusteringDepth.setInputData(depthMap);
 
-	createTrackbar("trackerBar", "changing_K", &K, 500, fitting );
-	createTrackbar("trackerBar2", "changing_K", &iterNum, 20, fitting);
+	createTrackbar("ClusteringNum", "changing_K", &K, 500, fitting );
+	createTrackbar("IterationNum", "changing_K", &iterNum, 20, fitting);
+	createTrackbar("priorWeight", "changing_K", &priorWeight, 100, fitting);
 
 	imshow("out", out);
 	imshow("src", src);

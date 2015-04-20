@@ -223,4 +223,22 @@ struct CAMER_PARAMETERS
 	}
 };
 
+struct NEIGBOURHOOD{
+	int u;
+	int v;
+	int linkID;
+};
+
+struct LOCAL_SURFACE
+{
+	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+	int num;
+	vector<int>listOfU;
+	vector<int>listOfV;
+	vector<NEIGBOURHOOD>neigbourList;
+	MatrixXd A;
+	VectorXd b;
+	VectorXd coefficients;
+};
+
 #endif
