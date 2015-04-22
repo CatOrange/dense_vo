@@ -29,7 +29,7 @@ using namespace cv;
 using namespace Eigen;
 const int numImage = 800;
 const int groundTruthDataNum = 5000;
-char filePath[256] = "D:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_far\\" ;
+char filePath[256] = "E:\\Dataset\\rgbd_dataset_freiburg3_structure_texture_far\\" ;
 char depthDataPath[256] ;
 char rgbDataPath[256] ;
 char rgbListPath[256] ;
@@ -814,7 +814,7 @@ void testFun2()
 {
 	namedWindow("changing_K", WINDOW_AUTOSIZE);
 	
-	src = imread("D:\\depth image\\rpy_DS.png");
+	src = imread("G:\\depth image\\rpy_DS.png");
 	out = src.clone();
 
 	cvtColor(src, src, CV_RGB2GRAY);
@@ -857,7 +857,7 @@ void testFun2()
 
 	createTrackbar("ClusteringNum", "changing_K", &K, 500, fitting );
 	createTrackbar("IterationNum", "changing_K", &iterNum, 20, fitting);
-	createTrackbar("priorWeight", "changing_K", &priorWeight, 100, fitting);
+	createTrackbar("priorWeight", "changing_K", &priorWeight, 300, fitting);
 
 	imshow("out", out);
 	imshow("src", src);

@@ -7,8 +7,8 @@
 //#define SAVEVIDEO
 
 #ifdef DOWNSAMPLING
-//const int IMAGE_WIDTH = 320;
-const int IMAGE_WIDTH = 376;
+const int IMAGE_WIDTH = 320;
+//const int IMAGE_WIDTH = 376;
 const int IMAGE_HEIGHT = 240;
 #else
 const int IMAGE_WIDTH = 640;
@@ -77,7 +77,7 @@ const double covLinearVel = 0.01 ;
 const double weightLinearVel = 1.0 / covLinearVel*10 ;
 
 //For reprojection
-const int expectedClusteringNum = 200;
+const int expectedClusteringNum = 80;
 const int minOptNum = 800 * (1 << (maxPyramidLevelBA - 1) * 2);
 //const int minOptNum = T_NUM;
 
