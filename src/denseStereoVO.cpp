@@ -147,7 +147,7 @@ void RtoEulerAngles(Matrix3d R, double a[3])
 
 void initCalibrationParameters()
 {
-    FileStorage fs("/home/nova/calibration/visensor.yml", FileStorage::READ);
+    FileStorage fs("/home/ygling2008/calibration/visensor.yml", FileStorage::READ);
 
     if (fs.isOpened() == false ){
         ROS_WARN("Can not open") ;

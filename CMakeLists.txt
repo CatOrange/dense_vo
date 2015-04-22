@@ -6,7 +6,7 @@ SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fopenmp -Ofast -march=native -mtune=native 
 SET(OpenCV_INCLUDE_DIRS "/usr/include/opencv;/usr/include/opencv2")
 
 find_package(catkin REQUIRED COMPONENTS
-  OpenCV
+  
   roscpp
   rospy
   std_msgs
@@ -24,6 +24,8 @@ find_package(catkin REQUIRED COMPONENTS
 # find_package(Boost REQUIRED COMPONENTS system)
 
 find_package(libvisensor 1.1.0 REQUIRED)
+
+find_package(OpenCV REQUIRED)
 
 add_message_files(
   DIRECTORY msg
@@ -132,7 +134,7 @@ catkin_package(
 include_directories(
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
-  ${OPENNI2_INCLUDE}
+#  ${OPENNI2_INCLUDE}
   ${libvisensor_INCLUDE_DIRS}
 )
 
@@ -145,6 +147,7 @@ include_directories(
 
 ## Declare a cpp executable
 add_executable(dense_vo_node src/denseStereoVO.cpp)
+add_executable(collect_data_node src/collectData.cpp)
 
 #add_executable(dense_vo_node src/denseVO.cpp)
 
@@ -153,17 +156,26 @@ add_executable(dense_vo_node src/denseStereoVO.cpp)
 # add_dependencies(IROS2015_node IROS2015_generate_messages_cpp)
 
 add_dependencies(dense_vo_node ${${PROJECT_NAME}_EXPORTED_TARGETS}})
+add_dependencies(collect_data_node ${${PROJECT_NAME}_EXPORTED_TARGETS}})
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(dense_vo_node
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
   ${libvisensor_LIBRARIES}
-  OpenNI2
+#  OpenNI2
  # ${Boost_FILESYSTEM_LIBRARY} 
  # ${Boost_SYSTEM_LIBRARY}
 )
 
+target_link_libraries(collect_data_node
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  ${libvisensor_LIBRARIES}
+#  OpenNI2
+ # ${Boost_FILESYSTEM_LIBRARY} 
+ # ${Boost_SYSTEM_LIBRARY}
+)
 
 #############
 ## Install ##
