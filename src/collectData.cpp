@@ -93,8 +93,19 @@ list<sensor_msgs::Image> imageQueue[2] ;
 //list<ros::Time> imageTimeQueue[2] ;
 
 
-void imuCallBack(const visensor_node::visensor_imu& imu_msg ){
+void imuCallBack(const visensor_node::visensor_imu& imu_msg )
+{
     imuQueue.push_back( imu_msg );
+    printf("ax=%f ay=%f az=%f wx=%f wy=%f wz=%f\n",
+           imu_msg.linear_acceleration.x,
+           imu_msg.linear_acceleration.y,
+           imu_msg.linear_acceleration.z,
+           imu_msg.angular_velocity.x,
+           imu_msg.angular_velocity.y,
+           imu_msg.angular_velocity.z) ;
+//    printf("%f\n", sqrt( SQ(imu_msg.linear_acceleration.x)
+//           +SQ(imu_msg.linear_acceleration.y)
+//           +SQ(imu_msg.linear_acceleration.z) ) ) ;
 }
 
 vector<double>imgTimeSeq;
@@ -108,7 +119,7 @@ void image0CallBack(const sensor_msgs::ImageConstPtr& msg)
     double t = msg->header.stamp.toSec() ;
     char c[128] ;
 
-    std::sprintf(c,"/home/ygling2008/dataSet/img0/%.6f_0.png\n", t ) ;
+    std::sprintf(c,"/home/ygling2008/dataSet/img0/%.6f_0.png", t ) ;
     imwrite(c, img) ;
     imgTimeSeq.push_back(t);
 
@@ -124,7 +135,7 @@ void image1CallBack(const sensor_msgs::ImageConstPtr& msg)
     double t = msg->header.stamp.toSec() ;
     char c[128] ;
 
-    std::sprintf(c,"/home/ygling2008/dataSet/img1/%.6f_1.png\n", t ) ;
+    std::sprintf(c,"/home/ygling2008/dataSet/img1/%.6f_1.png", t ) ;
     imwrite(c, img) ;
 
     imshow("img1", img ) ;

@@ -436,6 +436,8 @@ public:
 	Vector3d last_delta_v, last_delta_w;
 	Matrix3d last_delta_R;
 	Vector3d last_delta_T;
+	Matrix3d R_c_0 ;
+	Vector3d T_c_0 ;
 
 	STATEESTIMATION(int hh, int ww, CAMER_PARAMETERS* p)
 	{
@@ -1015,7 +1017,7 @@ public:
 		T += v;
 	}
 
-	bool denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T)
+        bool denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T, Mat& trackingImage)
 	{
 		//no assumption on angular and linear velocity
 		Matrix3d tmpR = R;
@@ -1063,6 +1065,8 @@ public:
 
 #endif
 
+
+
 			for (int ith = 0; ith < maxIteration; ith++)
 			{
 #ifdef DEBUG_DENSETRACKING
@@ -1079,6 +1083,10 @@ public:
 				}
 #endif
 
+                                if ( level == 0 ){
+                                    cv::cvtColor(grayImage[0], trackingImage, CV_GRAY2BGR);
+                                }
+
 				int actualNum = 0;
 				double currentError = 0;
 				MatrixXd ATA = MatrixXd::Zero(6, 6);
@@ -1091,6 +1099,7 @@ public:
 				{
 					Vector3d p2 = pi2List.block(0, i, 3, 1) + tmpT;
 					//Vector3d p2 = tmpR* currentPixelInfo.piList.block(0, i, 3, 1) + tmpT;
+
 
 #ifdef DEBUG_DENSETRACKING
 					Vector3d p1 = currentPixelInfo.piList.block(0, i, 3, 1);
@@ -1114,6 +1123,15 @@ public:
 					if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
 						continue;
 					}
+
+                                        if ( level == 0 )
+                                        {
+                                             Vector3d p1 = currentPixelInfo.piList.block(0, i, 3, 1);
+                                             int u = int(p1(1)*para->fy[level] / p1(2) + para->cy[level] + 0.5);
+                                             int v = int(p1(0)*para->fx[level] / p1(2) + para->cx[level] + 0.5);
+                                             line(trackingImage, Point2f(v, u), Point2f(v2, u2), Scalar(0, 255, 0), 1);
+                                             circle(trackingImage, Point2f(v2, u2), 3, Scalar(255, 0, 0));
+                                        }
 
 					//#ifdef DEBUG_DENSETRACKING
 					//						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];

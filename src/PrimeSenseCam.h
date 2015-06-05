@@ -153,7 +153,7 @@ public:
 
 		// setting resolution, FPS, pixel-format
 		openni::VideoMode vMode;
-    vMode.setFps(30);
+    vMode.setFps(60);
     vMode.setResolution(IMAGE_WIDTH, IMAGE_HEIGHT);
     //vMode.setResolution(320,240);
 		vMode.setPixelFormat(openni::PIXEL_FORMAT_RGB888 );
@@ -170,7 +170,7 @@ public:
 		openni::CameraSettings * camsettings = stream.getCameraSettings();
 		camsettings->setAutoExposureEnabled(false);
 		camsettings->setAutoWhiteBalanceEnabled(false);
-    int exposureTime = 10 ;
+    int exposureTime = 20 ;
     //camsettings->setGain( 30 ) ;
     if ( camsettings->setExposure( exposureTime ) != openni::STATUS_OK ){
       printf("Couldn't set exposure\n");

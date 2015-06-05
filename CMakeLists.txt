@@ -146,7 +146,7 @@ include_directories(
 # )
 
 ## Declare a cpp executable
-add_executable(dense_vo_node src/denseStereoVO.cpp)
+add_executable(dense_vo_node src/denseVO.cpp)
 add_executable(collect_data_node src/collectData.cpp)
 
 #add_executable(dense_vo_node src/denseVO.cpp)

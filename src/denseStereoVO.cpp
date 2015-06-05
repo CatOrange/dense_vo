@@ -91,6 +91,7 @@ list<sensor_msgs::Image> imageQueue[2] ;
 Mat depthImage[maxPyramidLevel];
 Mat grayImage[maxPyramidLevel];
 Mat gradientMapForDebug ;
+Mat trackingImage;
 //Mat grayImage[maxPyramidLevel*bufferSize];
 STATE tmpState;
 STATE* lastFrame;
@@ -98,9 +99,7 @@ STATE* lastFrame;
 bool vst = false;
 int rgbImageNum = 0 ;
 Matrix3d R_k_c;//R_k^(k+1)
-Matrix3d R_c_0;
 Vector3d T_k_c;//T_k^(k+1)
-Vector3d T_c_0;
 
 cv::StereoBM bm_( cv::StereoBM::BASIC_PRESET, maxDisparity, 21 );
 cv::StereoSGBM sgbm_(1, maxDisparity, 21 ) ;
@@ -125,7 +124,7 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
     Matrix3d nextR = Matrix3d::Identity();
     Vector3d nextT = Vector3d::Zero();
-    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT);
+    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, nextR, nextT, trackingImage);
 
     T_k_c = nextR * T_k_c + nextT;
     R_k_c = nextR * R_k_c;
@@ -134,7 +133,7 @@ void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 bool keyframeToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c )
 {
     STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-    return slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c);
+    return slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, R_k_c, T_k_c, trackingImage);
 }
 
 void RtoEulerAngles(Matrix3d R, double a[3])
@@ -317,6 +316,8 @@ void estimateCurrentState()
         pyrDownMeanSmooth<uchar>(grayImage[kk - 1], grayImage[kk]);
     }
 
+    trackingImage = grayImage[0] ;
+
     if ( vst == false )
     {
         vst = true;
@@ -326,6 +327,8 @@ void estimateCurrentState()
         memcpy(&img0.data[0], &iter0->data[0], iter0->height*iter0->width ) ;
 
         //bm_(img1, img0, disparity, CV_32F);
+
+        //printf("%d %d %d %d\n", img1.rows, img1.cols, img0.rows, img0.cols ) ;
         sgbm_(img1, img0, disparity ) ;
         disparity.convertTo( disparity, CV_32F );
         disparity /= 16 ;
@@ -375,8 +378,8 @@ void estimateCurrentState()
 
         Matrix3d deltaR_c = stereoPara[1].Ric.transpose() * deltaR * stereoPara[1].Ric ;
 
-        //R_k_c = deltaR.transpose() * R_k_c ;
-        R_k_c = deltaR_c.transpose() * R_k_c ;
+        R_k_c = deltaR.transpose() * R_k_c ;
+        //R_k_c = deltaR_c.transpose() * R_k_c ;
 
         //puts("before dense tracking") ;
 
@@ -386,8 +389,8 @@ void estimateCurrentState()
         insertKeyFrameFlag = keyframeToFrameDenseTracking( R_k_c, T_k_c );
 #endif
 
-        R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
-        T_c_0 = R_c_0*(
+        Matrix3d R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
+        Vector3d T_c_0 = R_c_0*(
                     R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
 
         pubOdometry(T_c_0, R_c_0);
@@ -452,6 +455,8 @@ void estimateCurrentState()
     cv::moveWindow("image1", 0, 0 );
     imshow("dense key points", gradientMapForDebug ) ;
     cv::moveWindow("dense key points", 500, 0 );
+    imshow("trackingImage", trackingImage ) ;
+    cv::moveWindow("dense key points", 1000, 1000 );
 
     if ( insertKeyFrameFlag ){
         imshow("image0", img0 ) ;

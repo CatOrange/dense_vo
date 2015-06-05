@@ -69,7 +69,7 @@ const double minimumUpdateTranslationThreshold = 0.005;
 const double minimumUpdateAngularThreshold = 0.5/180.0*PI ;
 const int maxIteration = 5 ;
 const int maxPyramidLevel = 3 ;
-const int minDenseTrackingNum = 32000 ;
+const int minDenseTrackingNum = 20000 ;
 const double covRotationVel = 1.0 / 180.0 * PI ;
 const double weightRotationVel = 1.0 / covRotationVel*10 ;
 const double covLinearVel = 0.01 ;
@@ -103,7 +103,7 @@ const int ompNumThreads = 2;
 /*
 for ros
 */
-const int bufferSize = 10 ;
+const int bufferSize = 30 ;
 
 const int maxDisparity = 96 ;
 

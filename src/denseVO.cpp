@@ -106,7 +106,7 @@ Vector3d R_to_ypr(const Matrix3d& R)
   ypr(2) = r;
   return 180.0 / PI * ypr;
 }
-
+/*
 void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
 {
     Matrix3d nextR = Matrix3d::Identity();
@@ -122,7 +122,7 @@ void keyframeToFrameDenseTracking(int bufferHead, Matrix3d& R_k_c, Vector3d& T_k
     STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
     slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, bufferHead, R_k_c, T_k_c);
 }
-
+*/
 void RtoEulerAngles(Matrix3d R, double a[3])
 {
     double theta = acos(0.5*(R(0, 0) + R(1, 1) + R(2, 2) - 1.0));
@@ -237,7 +237,7 @@ void estimateCurrentState()
         {
             vst = true;
 
-            slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero() );
+            //slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero() );
             //slidingWindows.planeDection();
 
             R_k_c = Matrix3d::Identity();
@@ -253,11 +253,11 @@ void estimateCurrentState()
             continue ;
         }
 
-    #ifdef FRAME_TO_FRAME
-        frameToFrameDenseTracking(R_k_c, T_k_c);
-    #else
-        keyframeToFrameDenseTracking( bufferHead, R_k_c, T_k_c );
-    #endif
+//    #ifdef FRAME_TO_FRAME
+//        frameToFrameDenseTracking(R_k_c, T_k_c);
+//    #else
+//        keyframeToFrameDenseTracking( bufferHead, R_k_c, T_k_c );
+//    #endif
 
         R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
         T_c_0 = R_c_0*(
@@ -274,7 +274,7 @@ void estimateCurrentState()
 
         if ((cnt % keyFrameInterval) == 1)
         {
-            slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, R_c_0, T_c_0 );
+            //slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, R_c_0, T_c_0 );
 
             //pubOdometry(T_c_0, R_c_0);
             //pubPath(T_c_0);
@@ -421,7 +421,7 @@ int main(int argc, char** argv )
 
     //fun() ;
 
-    ros::Rate loop_rate(200.0);
+    ros::Rate loop_rate(500.0);
     bufferHead = bufferTail = 0 ;
     while( n.ok() )
     {
