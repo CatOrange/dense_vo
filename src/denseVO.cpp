@@ -15,6 +15,8 @@
 #include "image_transport/image_transport.h"
 #include "sensor_msgs/image_encodings.h"
 #include "sensor_msgs/PointCloud.h"
+#include "sensor_msgs/fill_image.h"
+#include "opencv2/gpu/gpu.hpp"
 
 //for c++ std library
 #include <iostream>
@@ -60,13 +62,13 @@ using namespace std;
 using namespace cv;
 using namespace Eigen;
 
-CAMER_PARAMETERS cameraParameters ;
+CAMER_PARAMETERS cameraParameters;
 //CAMER_PARAMETERS cameraParameters(535.4, 539.2, 320.1, 247.6);//TUM Freiburg 3 sequences
 //CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6,	255.3,	0.2624, -0.9531, -0.0054, 0.0026, 1.1633);
 //CAMER_PARAMETERS cameraParameters(517.3, 516.5, 318.6, 255.3);//TUM Freiburg 1 sequences
 STATEESTIMATION slidingWindows(IMAGE_HEIGHT, IMAGE_WIDTH, &cameraParameters);
-Matrix3d firstFrameRtoVICON;
-Vector3d firstFrameTtoVICON;
+Matrix3f firstFrameRtoVICON;
+Vector3f firstFrameTtoVICON;
 
 //PrimeSenseCam cam;
 
@@ -75,6 +77,8 @@ ros::Publisher pub_odometry ;
 ros::Publisher pub_pose ;
 ros::Publisher pub_cloud ;
 ros::Publisher pub_grayImage ;
+ros::Publisher pub_resudualMap ;
+ros::Publisher pub_gradientMapForDebug ;
 ros::Subscriber sub_image;
 visualization_msgs::Marker path_line;
 
@@ -87,45 +91,29 @@ bool vst = false;
 int rgbImageNum = 0 ;
 int bufferHead = 0;
 int bufferTail = 0 ;
-Matrix3d R_k_c;//R_k^(k+1)
-Matrix3d R_c_0;
-Vector3d T_k_c;//T_k^(k+1)
-Vector3d T_c_0;
+Matrix3f R_k_c;//R_k^(k+1)
+Matrix3f R_c_0;
+Vector3f T_k_c;//T_k^(k+1)
+Vector3f T_c_0;
 
-Vector3d R_to_ypr(const Matrix3d& R)
+Vector3f R_to_ypr(const Matrix3f& R)
 {
-  Vector3d n = R.col(0);
-  Vector3d o = R.col(1);
-  Vector3d a = R.col(2);
-  Vector3d ypr(3);
-  double y = atan2(n(1), n(0));
-  double p = atan2(-n(2), n(0) * cos(y) + n(1) * sin(y));
-  double r = atan2(a(0) * sin(y) - a(1) * cos(y), -o(0) * sin(y) + o(1) * cos(y));
+  Vector3f n = R.col(0);
+  Vector3f o = R.col(1);
+  Vector3f a = R.col(2);
+  Vector3f ypr(3);
+  float y = atan2(n(1), n(0));
+  float p = atan2(-n(2), n(0) * cos(y) + n(1) * sin(y));
+  float r = atan2(a(0) * sin(y) - a(1) * cos(y), -o(0) * sin(y) + o(1) * cos(y));
   ypr(0) = y;
   ypr(1) = p;
   ypr(2) = r;
   return 180.0 / PI * ypr;
 }
-/*
-void frameToFrameDenseTracking(Matrix3d& R_k_c, Vector3d& T_k_c)
-{
-    Matrix3d nextR = Matrix3d::Identity();
-    Vector3d nextT = Vector3d::Zero();
-    slidingWindows.denseTrackingWithoutSuperpixel(lastFrame, grayImage, bufferHead, nextR, nextT);
 
-    T_k_c = nextR * T_k_c + nextT;
-    R_k_c = nextR * R_k_c;
-}
-
-void keyframeToFrameDenseTracking(int bufferHead, Matrix3d& R_k_c, Vector3d& T_k_c )
+void RtoEulerAngles(Matrix3f R, float a[3])
 {
-    STATE* keyframe = &slidingWindows.states[slidingWindows.tail];
-    slidingWindows.denseTrackingWithoutSuperpixel(keyframe, grayImage, bufferHead, R_k_c, T_k_c);
-}
-*/
-void RtoEulerAngles(Matrix3d R, double a[3])
-{
-    double theta = acos(0.5*(R(0, 0) + R(1, 1) + R(2, 2) - 1.0));
+    float theta = acos(0.5*(R(0, 0) + R(1, 1) + R(2, 2) - 1.0));
     a[0] = (R(2, 1) - R(1, 2)) / (2.0* sin(theta));
     a[1] = (R(0, 2) - R(2, 0)) / (2.0* sin(theta));
     a[2] = (R(1, 0) - R(0, 1)) / (2.0* sin(theta));
@@ -133,7 +121,7 @@ void RtoEulerAngles(Matrix3d R, double a[3])
 
 void initCalibrationParameters()
 {
-    FileStorage fs("/home/nova/calibration/camera_rgbd_sensor.yml", FileStorage::READ);
+    //FileStorage fs("/home/nova/calibration/camera_rgbd_sensor.yml", FileStorage::READ);
 
     Mat cameraMatrix ;
     Mat distortionCoff ;
@@ -156,6 +144,7 @@ void initCalibrationParameters()
     distortionCoff.at<float>(0, 1) = -0.095764 ;
     distortionCoff.at<float>(0, 2) = 0.007353999999999999 ;
     distortionCoff.at<float>(0, 3) = 0.001485 ;
+    distortionCoff.at<float>(0, 4) = 0 ;
 
 //    fs["camera_matrix"] >> cameraMatrix ;
 //    fs["distortion_coefficients"] >> distortionCoff ;
@@ -171,10 +160,10 @@ void initCalibrationParameters()
 
 }
 
-void pubOdometry(const Vector3d& p, const Matrix3d& R )
+void pubOdometry(const Vector3f& p, const Matrix3f& R )
 {
     nav_msgs::Odometry odometry;
-    Quaterniond q(R) ;
+    Quaternionf q(R) ;
 
     odometry.header.stamp = ros::Time::now();
     odometry.header.frame_id = "world";
@@ -194,7 +183,7 @@ void pubOdometry(const Vector3d& p, const Matrix3d& R )
     pub_pose.publish(pose_stamped);
 }
 
-void pubPath(const Vector3d& p)
+void pubPath(const Vector3f& p)
 {
     geometry_msgs::Point pose_p;
     pose_p.x = p(0);
@@ -205,6 +194,12 @@ void pubPath(const Vector3d& p)
     path_line.scale.x = 0.01 ;
     pub_path.publish(path_line);
 }
+
+int cnt = 0;
+Mat inputImage[maxPyramidLevel] ;
+Mat inputDepth[maxPyramidLevel] ;
+Mat gradientMapForDebug, residualMap, display ;
+sensor_msgs::Image msg;
 
 void init()
 {
@@ -220,37 +215,66 @@ void init()
         }
     }
     initCalibrationParameters() ;
+    residualMap.create(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8U );
     //cam.start();
 }
-
-int cnt = 0;
 
 void estimateCurrentState()
 {
     for ( int bufferLength = ( bufferTail - bufferHead + bufferSize ) % bufferSize ; bufferLength > 0 ; bufferLength-- )
     {
-
-        cnt++ ;
-        double t = (double)cvGetTickCount();
-
+        //printf("head=%d tail=%d\n", bufferHead, bufferTail ) ;
+        //cnt++ ;
+        float t = (float)cvGetTickCount();
+        for ( int i = 0 ; i < maxPyramidLevel ; i++ ){
+            inputImage[i] = grayImage[bufferHead*maxPyramidLevel+i] ;
+            inputDepth[i] = depthImage[bufferHead*maxPyramidLevel+i] ;
+        }
+        bufferHead++ ;
+        if ( bufferHead >= bufferSize ){
+            bufferHead -= bufferSize ;
+        }
+//        imshow("image_gray", inputImage[0] ) ;
+//        waitKey(1) ;
         if (vst == false )//the first frame
         {
             vst = true;
+            slidingWindows.insertFrame(grayImage, Matrix3f::Identity(), Vector3f::Zero(), Vector3f::Zero() );
+            float ttt = (float)cvGetTickCount() ;
+            slidingWindows.prepareKeyFrame(&slidingWindows.states[slidingWindows.tail], inputDepth, gradientMapForDebug );
 
-            //slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, Matrix3d::Identity(), Vector3d::Zero() );
-            //slidingWindows.planeDection();
+            msg.header.stamp = ros::Time() ;
+            sensor_msgs::fillImage(msg, sensor_msgs::image_encodings::BGR8, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_WIDTH*3,
+                                   gradientMapForDebug.data );
+            pub_gradientMapForDebug.publish(msg) ;
 
-            R_k_c = Matrix3d::Identity();
-            T_k_c = Vector3d::Zero();
 
-            lastFrame = &slidingWindows.states[slidingWindows.tail];
+            printf("prepare keyframe time: %lf\n", ((float)cvGetTickCount() - ttt) / (cvGetTickFrequency() * 1000) ) ;
 
-            bufferHead++ ;
-            if ( bufferHead >= bufferSize ){
-                bufferHead -= bufferSize ;
-            }
-
+            slidingWindows.R_k_2_c = Matrix3f::Identity();
+            slidingWindows.T_k_2_c = Vector3f::Zero();
             continue ;
+        }
+        //dense tracking
+        MatrixXf lastestATA ;
+        float averageResidial ;
+        STATE* keyFrame = slidingWindows.getKeyFrame_ptr();
+        float validPercent = slidingWindows.denseTrackingHuber(keyFrame, inputImage, slidingWindows.R_k_2_c, slidingWindows.T_k_2_c, lastestATA, averageResidial);
+        //slidingWindows.badPixelFiltering(keyFrame, denseTrackingImage, slidingWindows.R_k_2_c, slidingWindows.T_k_2_c) ;
+        slidingWindows.visualizeResidualMap(keyFrame, inputImage, slidingWindows.R_k_2_c, slidingWindows.T_k_2_c, residualMap, display);
+
+        msg.header.stamp = ros::Time() ;
+        sensor_msgs::fillImage(msg, sensor_msgs::image_encodings::BGR8, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_WIDTH*3,
+                               display.data );
+        pub_resudualMap.publish(msg) ;
+
+        bool insertKeyFrameFlag = false ;
+        //printf("validPercent=%f averageResidial=%f\n", validPercent, averageResidial ) ;
+        if ( validPercent < 0.05 || lastestATA.rows() < 6
+             || slidingWindows.T_k_2_c.norm() > 0.5
+           //  || averageResidial > 10.0
+             ){
+            insertKeyFrameFlag = true ;
         }
 
 //    #ifdef FRAME_TO_FRAME
@@ -259,12 +283,11 @@ void estimateCurrentState()
 //        keyframeToFrameDenseTracking( bufferHead, R_k_c, T_k_c );
 //    #endif
 
-        R_c_0 = slidingWindows.states[slidingWindows.tail].R_k0*R_k_c.transpose();
-        T_c_0 = R_c_0*(
-                    R_k_c*(slidingWindows.states[slidingWindows.tail].R_k0.transpose())*slidingWindows.states[slidingWindows.tail].T_k0 - T_k_c);
+        Matrix3f R_bk1_2_b0 = slidingWindows.states[slidingWindows.tail].R_bk_2_b0*slidingWindows.R_k_2_c.transpose();
+        Vector3f T_bk1_2_b0 = slidingWindows.states[slidingWindows.tail].T_bk_2_b0 + R_bk1_2_b0*slidingWindows.T_k_2_c ;
 
-        pubOdometry(T_c_0, R_c_0);
-        pubPath(T_c_0);
+        pubOdometry(T_bk1_2_b0, R_bk1_2_b0);
+        pubPath(T_bk1_2_b0);
 
         //cv::Mat falseColorsMap;
         //applyColorMap(residualImage, falseColorsMap, cv::COLORMAP_RAINBOW );
@@ -272,32 +295,27 @@ void estimateCurrentState()
         //cv::imshow("Resid", falseColorsMap);
         //cv::waitKey(10) ;
 
-        if ((cnt % keyFrameInterval) == 1)
+        if ( insertKeyFrameFlag )
         {
-            //slidingWindows.insertKeyFrame(grayImage, depthImage, bufferHead, R_c_0, T_c_0 );
+            slidingWindows.insertFrame(inputImage, R_bk1_2_b0, T_bk1_2_b0, Vector3f::Zero() );
+            float ttt = (float)cvGetTickCount() ;
+            slidingWindows.prepareKeyFrame(&slidingWindows.states[slidingWindows.tail], inputDepth, gradientMapForDebug );
 
-            //pubOdometry(T_c_0, R_c_0);
-            //pubPath(T_c_0);
-            cout << cnt/keyFrameInterval << "-" << "currentPosition:\n" << T_c_0.transpose() << endl;
+            msg.header.stamp = ros::Time() ;
+            sensor_msgs::fillImage(msg, sensor_msgs::image_encodings::BGR8, IMAGE_HEIGHT, IMAGE_WIDTH, IMAGE_WIDTH*3,
+                                   gradientMapForDebug.data );
+            pub_gradientMapForDebug.publish(msg) ;
 
-            R_k_c = Matrix3d::Identity();
-            T_k_c = Vector3d::Zero();
-            lastFrame = &slidingWindows.states[slidingWindows.tail];
+            printf("prepare keyframe time: %lf\n", ((float)cvGetTickCount() - ttt) / (cvGetTickFrequency() * 1000) ) ;
+
+            slidingWindows.R_k_2_c = Matrix3f::Identity();
+            slidingWindows.T_k_2_c = Vector3f::Zero();
         }
-        else
-        {
-    #ifdef FRAME_TO_FRAME
-            lastFrame = &tmpState;
-            tmpState.insertFrame(grayImage, depthImage, R_c_0, T_c_0, slidingWindows.para );
-    #endif
-        }
-
-        printf("dense tracking time: %f\n", ((double)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
-
-        bufferHead++ ;
-        if ( bufferHead >= bufferSize ){
-            bufferHead -= bufferSize ;
-        }
+        printf("dense tracking time: %f\n", ((float)cvGetTickCount() - t) / (cvGetTickFrequency() * 1000) );
+//        bufferHead++ ;
+//        if ( bufferHead >= bufferSize ){
+//            bufferHead -= bufferSize ;
+//        }
     }
 }
 
@@ -402,6 +420,8 @@ int main(int argc, char** argv )
     pub_odometry = n.advertise<nav_msgs::Odometry>("/denseVO/odometry", 1000);;
     pub_pose = n.advertise<geometry_msgs::PoseStamped>("/denseVO/pose", 1000);
     pub_cloud = n.advertise<sensor_msgs::PointCloud>("/denseVO/cloud", 1000);
+    pub_resudualMap = n.advertise<sensor_msgs::Image>("denseVO/residualMap", 100 );
+    pub_gradientMapForDebug = n.advertise<sensor_msgs::Image>("denseVO/debugMap", 100 );
 
     //pub_grayImage = it.advertise("camera/grayImage", 1 );
     //pub_depthImage = it.advertise("camera/depthImage", 1 ) ;
@@ -421,7 +441,7 @@ int main(int argc, char** argv )
 
     //fun() ;
 
-    ros::Rate loop_rate(500.0);
+    ros::Rate loop_rate(100.0);
     bufferHead = bufferTail = 0 ;
     while( n.ok() )
     {

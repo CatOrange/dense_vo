@@ -31,8 +31,8 @@
 #include <boost/thread.hpp>
 
 //for SLAM
-#include "kMeansClustering.h"
-#include "planeExtraction.h"
+//#include "kMeansClustering.h"
+//#include "planeExtraction.h"
 #include "stateEstimation.h"
 #include "variableDefinition.h"
 #include "tic_toc.h"

@@ -1,2231 +1,563 @@
 #ifndef __STATEESTIMATION_H
 #define __STATEESTIMATION_H
-
-#include "dataStructure.h"
-#include "variableDefinition.h"
-#include "normalMapGeneration.h"
-//#include "AHClustering.h"
-#include "kMeansClustering.h"
-#include "utility.h"
-#include <cmath>
-#include <stdio.h>
-#include <algorithm>
-#include <vector>
-#include <list>
-#include <omp.h>
-#include "Eigen/Dense"
-#include "Eigen/SparseCore"
-#include "Eigen/SparseCholesky"
-#include "opencv2/opencv.hpp"
-#include "opencv2/highgui/highgui.hpp"
-#include "opencv2/calib3d/calib3d.hpp"
-#include "opencv2/imgproc/imgproc.hpp"
-#include "opencv2/core/core.hpp"
-#include "opencv2/opencv.hpp"
-#include "opencv2/features2d/features2d.hpp"
-#include "sophus/se3.hpp"
-using namespace std;
-using namespace cv;
-using namespace Eigen;
-
-
-/*
-
-for Bundle Adjustment
-
-*/
-
-
-struct PIXEL_INFO_IN_A_FRAME
-{
-	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-	vector<MatrixXd> Aij;
-	vector<MatrixXd> AijTAij;
-	MatrixXd piList;
-	vector<double> intensity;
-	PIXEL_INFO_IN_A_FRAME()
-	{
-		Aij.clear();
-		AijTAij.clear();
-		intensity.clear();
-	}
-	~PIXEL_INFO_IN_A_FRAME(){
-	}
-};
-
-struct SUPERPIXEL_INFO
-{
-public:
-	std::vector<int> listOfU;
-	std::vector<double> listOfU_;//size of listOfU_ may be different from size of listOfU!
-	std::vector<int> listOfV;
-	std::vector<double> listOfV_;//size of listOfV_ may be different from size of listOfV!
-	std::vector<unsigned char>intensity;
-	SUPERPIXEL_INFO()
-	{
-		listOfU.clear();
-		listOfU_.clear();
-		listOfV.clear();
-		listOfV_.clear();
-		intensity.clear();
-	}
-	~SUPERPIXEL_INFO(){
-	}
-};
-
-struct SUPERPIXEL_IN_3D_SPACE
-{
-	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-	int stateID;
-
-	bool valid;
-	bool ready;
-
-	MatrixXd A;
-	VectorXd b;
-	VectorXd coefficients;
-	vector<NEIGBOURHOOD>neigbourList;
-
-	SUPERPIXEL_INFO superpixelsInPyramid[maxPyramidLevel];
-	vector<short> reprojectList;
-
-	SUPERPIXEL_IN_3D_SPACE(){
-		reprojectList.clear();
-		reprojectList.reserve(slidingWindowSize);
-	}
-	~SUPERPIXEL_IN_3D_SPACE(){
-	}
-
-	char used;
-	// -1 == init
-	// 0 == in sw_ft[] (in lamda)
-	// 1 == parallax < threshold, not in lamda, need to be marginalized
-	// 2 == outliers
-};
-
-class STATE // each frame information of sliding window
-{
-public:
-	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-	Matrix3d R_k0;//R_k^0
-	Vector3d T_k0;//T_k^0
-	//Vector3d alpha, beta;
-	//MatrixXd P_cov;
-	unsigned long long timestamp;
-	//int id; // frame ID
-	int totalNumOfValidPixels[maxPyramidLevel];
-
-	class STATE *next; // next frame
-	// === nonlinear ===
-	//Matrix3d R_nl;
-	//Quaterniond dq;
-	//MatrixXd P_nl; // P_cov_nl
-	unsigned char* intensity[maxPyramidLevel];
-	//[maxPyramidLevel][IMAGE_HEIGHT][IMAGE_WIDTH];
-	float* depthImage[maxPyramidLevel];
-	//[maxPyramidLevel][IMAGE_HEIGHT][IMAGE_WIDTH];
-	double* gradientX[maxPyramidLevel];
-	//[maxPyramidLevel][IMAGE_HEIGHT][IMAGE_WIDTH];
-	double* gradientY[maxPyramidLevel];
-	//[maxPyramidLevel][IMAGE_HEIGHT][IMAGE_WIDTH];
-	PIXEL_INFO_IN_A_FRAME pixelInfo[maxPyramidLevel];
-
-	/*
-	vector<MatrixXd> Aij(height*width);
-	vector<MatrixXd> AijTAij(height*width);
-	vector<Vector3d> pi(height*width);
-	*/
-	STATE()
-	{
-		int height = IMAGE_HEIGHT;
-		int width = IMAGE_WIDTH;
-		for (int i = 0; i < maxPyramidLevel; i++)
-		{
-			intensity[i] = new unsigned char[height*width];
-			depthImage[i] = new float[height*width];
-			gradientX[i] = new double[height*width];
-			gradientY[i] = new double[height*width];
-			height >>= 1;
-			width >>= 1;
-		}
-		R_k0 = Matrix3d::Identity();
-		T_k0 = Vector3d::Zero();
-	}
-
-	~STATE()
-	{
-		for (int i = 0; i < maxPyramidLevel; i++)
-		{
-			if (intensity[i] != NULL){
-				delete[] intensity[i];
-			}
-			if (depthImage[i] != NULL){
-				delete[] depthImage[i];
-			}
-			if (gradientX[i] != NULL){
-				delete[] gradientX[i];
-			}
-			if (gradientY[i] != NULL){
-				delete[] gradientY[i];
-			}
-		}
-	}
-
-	void insertFrame(const Mat grayImage[maxPyramidLevel], const Mat depthImage[maxPyramidLevel], const Matrix3d& R, const Vector3d& T, CAMER_PARAMETERS* para)
-	{
-		//		STATE *current = this;
-		//		Mat currentDepthImage;
-		//
-		//		//init the intensity and the depth value
-		//		int n = IMAGE_HEIGHT;
-		//		int m = IMAGE_WIDTH;
-		//		for (int i = 0; i < maxPyramidLevel; i++)
-		//		{
-		//			memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
-		//			memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
-		//			n >>= 1;
-		//			m >>= 1;
-		//		}
-		//
-		//		//init the graident map
-		//		current->computeGradientMap( grayImage ) ;
-		//
-		//		//init the pixel info in a frame
-		//		for (int level = maxPyramidLevel - 1; level >= 0; level--)
-		//		{
-		//			int n = IMAGE_HEIGHT >> level;
-		//			int m = IMAGE_WIDTH >> level;
-		//			float* pDepth = current->depthImage[level];
-		//			double* pGradientX = current->gradientX[level];
-		//			double* pGradientY = current->gradientY[level];
-		//
-		//			current->pixelInfo[level].valid.clear();
-		//			current->pixelInfo[level].valid.resize(n*m);
-		//			current->pixelInfo[level].pi.clear();
-		//			current->pixelInfo[level].pi.resize(n*m);
-		//			current->pixelInfo[level].Aij.clear();
-		//			current->pixelInfo[level].Aij.resize(n*m);
-		//			current->pixelInfo[level].AijTAij.clear();
-		//			current->pixelInfo[level].AijTAij.resize(n*m);
-		//			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
-		//
-		////			omp_set_num_threads(ompNumThreads);
-		////#pragma omp parallel for 
-		//			for (int u = 0; u < n; u++)
-		//			{
-		//				for (int v = 0; v < m; v++)
-		//				{
-		//					int k = INDEX(u, v, n, m);
-		//					double Z = pDepth[k];
-		//					if (Z < zeroThreshold) {
-		//						currentPixelInfo.valid[k] = false;
-		//						continue;
-		//					}
-		//					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-		//						currentPixelInfo.valid[k] = false;
-		//						continue;
-		//					}
-		//					currentPixelInfo.valid[k] = true;
-		//
-		//					double X = (v - para->cx[level]) * Z / para->fx[level];
-		//					double Y = (u - para->cy[level]) * Z / para->fy[level];
-		//
-		//					currentPixelInfo.pi[k] << X, Y, Z;
-		//
-		//					MatrixXd oneBytwo(1, 2);
-		//					MatrixXd twoBySix(2, 6);
-		//
-		//					oneBytwo(0, 0) = pGradientX[k];
-		//					oneBytwo(0, 1) = pGradientY[k];
-		//
-		//					twoBySix(0, 0) = para->fx[level] / Z;
-		//					twoBySix(0, 1) = 0;
-		//					twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
-		//					twoBySix(1, 0) = 0;
-		//					twoBySix(1, 1) = para->fy[level] / Z;
-		//					twoBySix(1, 2) = -Y * para->fy[level] / SQ(Z);
-		//
-		//					twoBySix(0, 3) = twoBySix(0, 2) * Y;
-		//					twoBySix(0, 4) = twoBySix(0, 0)*Z - twoBySix(0, 2)*X;
-		//					twoBySix(0, 5) = -twoBySix(0, 0)*Y;
-		//					twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y;
-		//					twoBySix(1, 4) = -twoBySix(1, 2)* X;
-		//					twoBySix(1, 5) = twoBySix(1, 1)* X;
-		//
-		//					//currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
-		//					currentPixelInfo.Aij[k] = (oneBytwo*twoBySix).transpose();
-		//					currentPixelInfo.AijTAij[k] = currentPixelInfo.Aij[k] * currentPixelInfo.Aij[k].transpose();
-		//					/*
-		//					int k = INDEX(u, v, n, m);
-		//					double Z = pDepth[k];
-		//					if (Z < zeroThreshold) {
-		//						currentPixelInfo.valid[k] = false;
-		//						continue;
-		//					}
-		//					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-		//						currentPixelInfo.valid[k] = false;
-		//						continue;
-		//					}
-		//					currentPixelInfo.valid[k] = true;
-		//
-		//					double X = (v - para->cx[level]) * Z / para->fx[level];
-		//					double Y = (u - para->cy[level]) * Z / para->fy[level];
-		//
-		//					currentPixelInfo.pi[k] << X, Y, Z;
-		//
-		//					MatrixXd oneBytwo(1, 2);
-		//					MatrixXd twoByThree(2, 3);
-		//					MatrixXd threeBySix(3, 6);
-		//					MatrixXd oneBySix(1, 6);
-		//
-		//					oneBytwo(0, 0) = pGradientX[k];
-		//					oneBytwo(0, 1) = pGradientY[k];
-		//
-		//					twoByThree(0, 0) = para->fx[level] / Z;
-		//					twoByThree(0, 1) = 0;
-		//					twoByThree(0, 2) = -X * para->fx[level] / SQ(Z);
-		//					twoByThree(1, 0) = 0;
-		//					twoByThree(1, 1) = para->fy[level] / Z;
-		//					twoByThree(1, 2) = -Y * para->fy[level] / SQ(Z);
-		//
-		//					threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
-		//					threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
-		//					threeBySix(0, 4) = Z;
-		//					threeBySix(1, 3) = -Z;
-		//					threeBySix(0, 5) = -Y;
-		//					threeBySix(2, 3) = Y;
-		//					threeBySix(1, 5) = X;
-		//					threeBySix(2, 4) = -X;
-		//
-		//					currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
-		//					currentPixelInfo.AijTAij[k] = currentPixelInfo.Aij[k] * currentPixelInfo.Aij[k].transpose();
-		//					*/
-		//				}
-		//			}
-		//		}
-		//
-		//		//init the pose
-		//		current->R_k0 = R;
-		//		current->T_k0 = T;
-		//		
-	}
-
-	void computeGradientMap()
-	{
-		int height = IMAGE_HEIGHT;
-		int width = IMAGE_WIDTH;
-
-		//for eaxh pyramid level
-		for (int id = 0; id < maxPyramidLevel; id++)
-		{
-			totalNumOfValidPixels[id] = 0;
-			float* pDepth = depthImage[id];
-			double* pGradientX = gradientX[id];
-			double* pGradientY = gradientY[id];
-			unsigned char* pIntensity = intensity[id];
-
-			//Mat gradientXMap;
-			//Mat gradientYMap;
-
-			//Sobel(grayImage[id], gradientXMap, CV_64F, 1, 0 );
-			//Sobel(grayImage[id], gradientYMap, CV_64F, 0, 1 );
-
-			//memcpy(pGradientX, gradientXMap.data, height*width*sizeof(double));
-			//memcpy(pGradientY, gradientYMap.data, height*width*sizeof(double));
-
-			//calculate gradient map
-			//			omp_set_num_threads(ompNumThreads);
-			//#pragma omp parallel for 
-			for (int i = height - 2; i > 0; i--)
-			{
-				for (int j = width - 2; j > 0; j--)
-				{
-					if (pDepth[INDEX(i, j, height, width)] > zeroThreshold){
-						totalNumOfValidPixels[id]++;
-					}
-					//pGradientX[INDEX(i, j, height, width)] = 0.125*(
-					//	(int)pIntensity[INDEX(i - 1, j + 1, height, width)] - (int)pIntensity[INDEX(i - 1, j - 1, height, width)] +
-					//	((int)pIntensity[INDEX(i, j + 1, height, width)] << 1) - ((int)pIntensity[INDEX(i, j - 1, height, width)] << 1) +
-					//	(int)pIntensity[INDEX(i + 1, j + 1, height, width)] - (int)pIntensity[INDEX(i + 1, j - 1, height, width)]
-					//	);
-					//pGradientY[INDEX(i, j, height, width)] = 0.125*(
-					//	(int)pIntensity[INDEX(i + 1, j - 1, height, width)] - (int)pIntensity[INDEX(i - 1, j - 1, height, width)] +
-					//	((int)pIntensity[INDEX(i + 1, j, height, width)] << 1) - ((int)pIntensity[INDEX(i - 1, j, height, width)] << 1) +
-					//	(int)pIntensity[INDEX(i + 1, j + 1, height, width)] - (int)pIntensity[INDEX(i - 1, j + 1, height, width)]
-					//	);
-					pGradientX[INDEX(i, j, height, width)] = 0.5*(
-						(double)pIntensity[INDEX(i, j + 1, height, width)] - (double)pIntensity[INDEX(i, j - 1, height, width)]
-						);
-					pGradientY[INDEX(i, j, height, width)] = 0.5*(
-						(double)pIntensity[INDEX(i + 1, j, height, width)] - (double)pIntensity[INDEX(i - 1, j, height, width)]
-						);
-				}
-			}
-
-			//			omp_set_num_threads(ompNumThreads);
-			//#pragma omp parallel for 
-			for (int i = height - 2; i > 0; i--)
-			{
-
-				if (pDepth[INDEX(i, 0, height, width)] > zeroThreshold){
-					totalNumOfValidPixels[id]++;
-				}
-				if (pDepth[INDEX(i, width - 1, height, width)] > zeroThreshold){
-					totalNumOfValidPixels[id]++;
-				}
-
-				pGradientX[INDEX(i, 0, height, width)] = pGradientX[INDEX(i, 1, height, width)];
-				pGradientY[INDEX(i, 0, height, width)] = pGradientY[INDEX(i, 1, height, width)];
-				pGradientX[INDEX(i, width - 1, height, width)] = pGradientX[INDEX(i, width - 2, height, width)];
-				pGradientY[INDEX(i, width, height, width)] = pGradientY[INDEX(i, width - 2, height, width)];
-			}
-
-			//			omp_set_num_threads(ompNumThreads);
-			//#pragma omp parallel for 
-			for (int j = width - 1; j >= 0; j--)
-			{
-
-				if (pDepth[INDEX(0, j, height, width)] > zeroThreshold){
-					totalNumOfValidPixels[id]++;
-				}
-				if (pDepth[INDEX(height - 1, j, height, width)] > zeroThreshold){
-					totalNumOfValidPixels[id]++;
-				}
-
-				pGradientX[INDEX(0, j, height, width)] = pGradientX[INDEX(1, j, height, width)];
-				pGradientY[INDEX(0, j, height, width)] = pGradientY[INDEX(1, j, height, width)];
-				pGradientX[INDEX(height - 1, j, height, width)] = pGradientX[INDEX(height - 2, j, height, width)];
-				pGradientY[INDEX(height - 1, j, height, width)] = pGradientY[INDEX(height - 2, j, height, width)];
-			}
-
-			height >>= 1;
-			width >>= 1;
-		}
-	}
-};
+#include "state.h"
+#include "ros/ros.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
+#include "geometry_msgs/PoseStamped.h"
+#include "geometry_msgs/PoseArray.h"
 
 class STATEESTIMATION
 {
 public:
-	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-		//camera parameters
-		int height, width;
-	CAMER_PARAMETERS* para;
-	//kMeansClustering clustering;
-	//AHClustering clustering;
-	kMeansClusteringDepthSpace clustering;
-
-	//state sequences
-	int head, tail;
-	STATE states[slidingWindowSize];
-
-	//superpixels in sliding wiindow
-	int numOfSuperpixelsInSlidingWindow;
-	int numOfState;
-	int idCnt;
-	std::list<SUPERPIXEL_IN_3D_SPACE> superpixelList;
-
-	//occlusion mask for tomporal use only
-	bool mask[IMAGE_HEIGHT][IMAGE_WIDTH];
-	bool maskGradientFiltering[IMAGE_HEIGHT][IMAGE_WIDTH];
-	int maskStateID[IMAGE_HEIGHT][IMAGE_WIDTH];
-	int maskSuperpixelID[IMAGE_HEIGHT][IMAGE_WIDTH];
-	double maskDistance[IMAGE_HEIGHT][IMAGE_WIDTH];
-
-	//for dense tracking
-	Vector3d last_delta_v, last_delta_w;
-	Matrix3d last_delta_R;
-	Vector3d last_delta_T;
-	Matrix3d R_c_0 ;
-	Vector3d T_c_0 ;
-
-	STATEESTIMATION(int hh, int ww, CAMER_PARAMETERS* p)
-	{
-		height = hh;
-		width = ww;
-		para = p;
-
-		initSlidingWindow();
-		numOfSuperpixelsInSlidingWindow = 0;
-		numOfState = 0;
-		idCnt = 0;
-		memset(mask, true, sizeof(mask));
-
-		superpixelList.clear();
-		last_delta_v.setZero();
-		last_delta_w.setZero();
-		last_delta_R.setIdentity();
-		last_delta_T.setZero();
-	}
-
-	~STATEESTIMATION(){
-	}
-
-	void initSlidingWindow()
-	{
-		head = 0;
-		tail = -1;
-		for (int i = 0; i < slidingWindowSize; i++)
-		{
-			//states[i].pts = NULL;
-			if (i + 1 < slidingWindowSize){
-				states[i].next = &states[i + 1];
-			}
-		}
-		states[slidingWindowSize - 1].next = &states[0];
-	}
-
-	void insertSuperpixel(int K, int iterNum)
-	{
-		STATE *current = &states[tail];
-
-		clustering.setCameraParameters(height, width, para->fx[0], para->fy[0], para->cx[0], para->cy[0]);
-		clustering.setInputData(current->depthImage[0]);
-		clustering.setMask(&mask[0][0]);
-		//clustering.runClustering(K, iterNum);
-		clustering.runClustering(K, iterNum);
-
-		int currentNumOfSuperpixel = clustering.seedsNum;
-		//printf("clustering num:%d\n", currentNumOfSuperpixel);
-
-
-#ifdef DEBUG_CLUSTRING
-		printf("currentNumOfSuperpixel=%d\n", currentNumOfSuperpixel);
-		Mat now(height, width, CV_8UC3);
-		unsigned char*pIntensityDebug = current->intensity[0];
-		for (int i = 0; i < height; i++)
-		{
-			for (int j = 0; j < width; j++){
-				now.at<cv::Vec3b>(i, j)[0] = pIntensityDebug[INDEX(i, j, height, width)];
-				now.at<cv::Vec3b>(i, j)[1] = pIntensityDebug[INDEX(i, j, height, width)];
-				now.at<cv::Vec3b>(i, j)[2] = pIntensityDebug[INDEX(i, j, height, width)];
-			}
-		}
-		double proportion = 0.3;
-		RNG rng(100);
-		vector<short>R(currentNumOfSuperpixel);
-		vector<short>G(currentNumOfSuperpixel);
-		vector<short>B(currentNumOfSuperpixel);
-		vector<double> errorCheck(currentNumOfSuperpixel);
-		for (int i = 0; i < currentNumOfSuperpixel; i++){
-			R[i] = rng.uniform(0, 255);
-			G[i] = rng.uniform(0, 255);
-			B[i] = rng.uniform(0, 255);
-		}
-		for (int i = 0; i < height; i++)
-		{
-			for (int j = 0; j < width; j++)
-			{
-				if (clustering.labels[i][j] < 1){
-					continue;
-				}
-				int id = clustering.labels[i][j] - 1;
-				now.at<cv::Vec3b>(i, j)[0] = now.at<cv::Vec3b>(i, j)[0] * proportion + R[id] * (1 - proportion);
-				now.at<cv::Vec3b>(i, j)[1] = now.at<cv::Vec3b>(i, j)[1] * proportion + G[id] * (1 - proportion);
-				now.at<cv::Vec3b>(i, j)[2] = now.at<cv::Vec3b>(i, j)[2] * proportion + B[id] * (1 - proportion);
-			}
-		}
-		imshow("now", now);
-		waitKey(0);
-#endif
-
-		//1. init
-		vector<std::list<SUPERPIXEL_IN_3D_SPACE>::iterator> iterList(currentNumOfSuperpixel);
-		for (int i = 0; i < currentNumOfSuperpixel; i++)//actual ID is [1, currentNumOfSuperpixel], 0 is the label for invalid pixels
-		{
-			SUPERPIXEL_IN_3D_SPACE tmp;
-
-			tmp.stateID = tail;
-			tmp.valid = true;
-			numOfSuperpixelsInSlidingWindow++;
-
-			iterList[i] = superpixelList.emplace(superpixelList.end(), tmp);
-
-			//clear reproject list
-			iterList[i]->reprojectList.clear();
-			
-			//reserver space
-			int kk = clustering.numOfEachLabels[i + 1];
-			iterList[i]->b.resize(kk);
-			for (int ith = 0; ith < maxPyramidLevelBA; ith++)
-			{
-				iterList[i]->superpixelsInPyramid[ith].listOfU.clear();
-				iterList[i]->superpixelsInPyramid[ith].listOfU.reserve(kk);
-				iterList[i]->superpixelsInPyramid[ith].listOfU_.clear();
-				iterList[i]->superpixelsInPyramid[ith].listOfU_.reserve(kk);
-				iterList[i]->superpixelsInPyramid[ith].listOfV.clear();
-				iterList[i]->superpixelsInPyramid[ith].listOfV.reserve(kk);	
-				iterList[i]->superpixelsInPyramid[ith].listOfV_.clear();
-				iterList[i]->superpixelsInPyramid[ith].listOfV_.reserve(kk);
-			}
-		}
-		//printf("%d %d\n", currentNumOfSuperpixel, superpixelList.size());
-		//for (int i = 0; i < currentNumOfSuperpixel; i++){
-		//	printf("%d %f %f %f\n", iterList[i]->stateID, iterList[i]->normal[0], iterList[i]->normal[1], iterList[i]->normal[2] );
-		//}
-
-		//printf("[debug] cy=%f		fy=%f\n", para->cy[0], para->fy[0]);
-
-		//2. insert 2D observation
-		vector<int>cntPoints;
-		cntPoints.resize(currentNumOfSuperpixel);
-		cntPoints.assign(currentNumOfSuperpixel, 0);
-
-		double* pGradientX = states[tail].gradientX[0];
-		double* pGradientY = states[tail].gradientY[0];
-		unsigned char* pIntensity = states[tail].intensity[0];
-		for (int i = 0; i < height; i++)
-		{
-			for (int j = 0; j < width; j++)
-			{
-				if (clustering.labels[i][j] < 1){
-					continue;
-				}
-
-				if (maskGradientFiltering[i][j] == false){
-					continue;
-				}
-
-				int labelID = clustering.labels[i][j] - 1;
-				int sz = iterList[labelID]->superpixelsInPyramid[0].listOfU_.size();
-				iterList[labelID]->b(sz) = clustering.depth[INDEX(i, j, height, width)];
-
-				iterList[labelID]->superpixelsInPyramid[0].listOfU.push_back(i);
-				iterList[labelID]->superpixelsInPyramid[0].listOfU_.push_back((i - para->cy[0]) / para->fy[0]);
-				iterList[labelID]->superpixelsInPyramid[0].listOfV.push_back(j);
-				iterList[labelID]->superpixelsInPyramid[0].listOfV_.push_back((j - para->cx[0]) / para->fx[0]);
-				iterList[labelID]->superpixelsInPyramid[0].intensity.push_back(pIntensity[INDEX(i, j, height, width)]);
-			}
-		}
-
-		//4. calculate the pyramid observation of superpixel
-		for (int level = 1; level < maxPyramidLevelBA; level++)
-		{
-			int n = height >> level;
-			int m = width >> level;
-			double* pGradientX = states[tail].gradientX[level];
-			double* pGradientY = states[tail].gradientY[level];
-			int totalNum = 1 << (level * 2);
-			int halfNum = totalNum / 2;
-			vector<int> numList(totalNum);
-			unsigned char* pIntensity = states[tail].intensity[level];
-			for (int y = 0; y < n; y++)
-			{
-				for (int x = 0; x < m; x++)
-				{
-					int cnt = 0;
-					int leftTopY = y << level;
-					int leftTopX = x << level;
-					int rightDownY = (y + 1) << level;
-					int rightDownX = (x + 1) << level;
-					for (int i = leftTopY; i < rightDownY; i++)
-					{
-						for (int j = leftTopX; j < rightDownX; j++)
-						{
-							if (clustering.labels[i][j] < 1){
-								continue;
-							}
-							int labelID = clustering.labels[i][j] - 1;
-							if (iterList[labelID]->valid == false){
-								continue;
-							}
-							numList[cnt++] = labelID;
-						}
-					}
-					if (cnt == 0){
-						continue;
-					}
-					sort(numList.begin(), numList.begin() + cnt);
-					int num = 0;
-					int labelID = findMaxContinousLength(numList, cnt, num);
-					if (num < halfNum){
-						continue;
-					}
-
-					iterList[labelID]->superpixelsInPyramid[level].listOfU.push_back(y);
-					iterList[labelID]->superpixelsInPyramid[level].listOfU_.push_back((y - para->cy[level]) / para->fy[level]);
-					iterList[labelID]->superpixelsInPyramid[level].listOfV.push_back(x);
-					iterList[labelID]->superpixelsInPyramid[level].listOfV_.push_back((x - para->cx[level]) / para->fx[level]);
-					iterList[labelID]->superpixelsInPyramid[level].intensity.push_back(pIntensity[INDEX(y, x, n, m)]);
-				}
-			}
-		}
-
-		//5. check the validness of superpixel and fitting
-		int level = 0;
-		MatrixXd AT;
-		MatrixXd ATA;
-		LLT<MatrixXd> lltATA;
-		ComputationInfo info;
-		for (int i = 0; i < currentNumOfSuperpixel; i++)
-		{
-			
-			if (iterList[i]->superpixelsInPyramid[level].listOfU_.size() < minimumPixelsInASuperpixel){
-				iterList[i]->valid = false;
-				continue;
-			}
-			iterList[i]->valid = true;
-
-			int numOfPixels = iterList[i]->superpixelsInPyramid[level].listOfU_.size();
-			iterList[i]->A.resize(numOfPixels, MODEL_ORDER);
-			for (int k = 0; k < numOfPixels; k++)
-			{
-				double y = iterList[i]->superpixelsInPyramid[level].listOfU_[k];
-				double x = iterList[i]->superpixelsInPyramid[level].listOfV_[k];
-
-				iterList[i]->A(i, 0) = 1.0;
-				iterList[i]->A(i, 1) = x;
-				iterList[i]->A(i, 2) = y;
-				if (MODEL_ORDER > 3){
-					iterList[i]->A(i, 3) = y*x;
-				}
-			}
-			AT = iterList[i]->A.transpose();
-			ATA = AT*iterList[i]->A.transpose();
-			lltATA = ATA.llt();
-			info = lltATA.info();
-			if (info == Success){
-				iterList[i]->coefficients = lltATA.solve(AT*  iterList[i]->b);
-			}
-			else{
-				iterList[i]->valid = false;
-			}
-		}
-	}
-
-	void checkNormalProjectionOnNewKeyFrame()
-	{
-		int n = height;
-		int m = width;
-
-		int level = 0;
-		unsigned char *nextIntensity = states[tail].intensity[level];
-		int linkStateID = tail;
-
-		std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter;
-		for (iter = superpixelList.begin(); iter != superpixelList.end(); iter++)
-		{
-			int currentStateID = iter->stateID;
-			const SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
-			int sz = currentSuperpixel.listOfU_.size();
-			
-			MatrixXd piList(3, sz);
-			VectorXd tt(MODEL_ORDER);
-			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-			{
-				double x = currentSuperpixel.listOfV_[i];
-				double y = currentSuperpixel.listOfU_[i];
-				tt(0) = 1.0;
-				tt(1) = x;
-				tt(2) = y;
-				if (MODEL_ORDER > 3){
-					tt(3) = x*y;
-				}
-
-				double lambda = tt.transpose() * iter->coefficients ;
-				piList(0, i) = lambda * x;
-				piList(1, i) = lambda * y;
-				piList(2, i) = lambda ;
-			}
-
-			int linkStateID = tail;
-			unsigned char *nextIntensity = states[linkStateID].intensity[level];
-			Vector3d deltaT = states[linkStateID].R_k0.transpose()*(states[currentStateID].T_k0 - states[linkStateID].T_k0);
-			MatrixXd pjList = states[linkStateID].R_k0.transpose()*states[currentStateID].R_k0 * piList;
-
-			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-			{
-				Vector3d pj = pjList.block(0, i, 3, 1) + deltaT;
-				if (pj(2) < zeroThreshold){
-					continue;
-				}
-
-				int u2 = int(pj(1)*para->fy[level] / pj(2) + para->cy[level] + 0.5);
-				int v2 = int(pj(0)*para->fx[level] / pj(2) + para->cx[level] + 0.5);
-
-				if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-					continue;
-				}
-
-				double w = 1.0;
-				double r = currentSuperpixel.intensity[i] - nextIntensity[INDEX(u2, v2, n, m)];
-				double r_fabs = fabs(r);
-				if (r_fabs > huberKernelThreshold){
-					w = huberKernelThreshold / r_fabs;
-				}
-				if (w > validPixelThreshold){
-					//validNum++;
-					mask[u2][v2] = false;
-				}
-			}
-		}
-	}
-
-	void insertKeyFrame(const Mat grayImage[maxPyramidLevel], const Mat depthImage[maxPyramidLevel],
-		Mat& gradientMapForDebug, const Matrix3d& R, const Vector3d& T)
-	{
-		cv::cvtColor(grayImage[0], gradientMapForDebug, CV_GRAY2BGR);
-
-		if (numOfState == slidingWindowSize){
-			//puts("pop state");
-			popOldestState();
-		}
-		tail++;
-		numOfState++;
-		if (tail >= slidingWindowSize){
-			tail -= slidingWindowSize;
-		}
-		STATE *current = &states[tail];
-		//Mat currentDepthImage;
-
-		//init the intensity and the depth value
-		int n = height;
-		int m = width;
-		for (int i = 0; i < maxPyramidLevel; i++)
-		{
-			memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
-			memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
-			n >>= 1;
-			m >>= 1;
-		}
-
-		//init the graident map
-		current->computeGradientMap();
-
-		//init the pixel info in a frame
-		for (int level = maxPyramidLevel - 1; level >= 0; level--)
-		{
-			int n = height >> level;
-			int m = width >> level;
-			float* pDepth = current->depthImage[level];
-			unsigned char*pIntensity = current->intensity[level];
-			double* pGradientX = current->gradientX[level];
-			double* pGradientY = current->gradientY[level];
-
-			int validNum = 0;
-			vector<GRADIENTNODE> gradientList(n*m);
-			for (int u = 0; u < n; u++)
-			{
-				for (int v = 0; v < m; v++)
-				{
-					int k = INDEX(u, v, n, m);
-					double Z = pDepth[k];
-					if (Z < zeroThreshold) {
-						continue;
-					}
-					if (SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
-						continue;
-					}
-					gradientList[validNum].cost = SQ(pGradientX[k]) + SQ(pGradientY[k]);
-					gradientList[validNum].u = u;
-					gradientList[validNum].v = v;
-					validNum++;
-				}
-			}
-			printf("dense tracking validNum: %d\n", validNum);
-
-			sort(&gradientList[0], &gradientList[validNum]);
-
-			int bin[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-			int tmpCnt = 0;
-			int numThrehold = (minDenseTrackingNum >> level) / 8;
-			//int numThrehold = 1000000000 ;
-			for (int i = 0; i < validNum; i++)
-			{
-				int u = gradientList[i].u;
-				int v = gradientList[i].v;
-				int k = INDEX(u, v, n, m);
-				int index = angelSpace(pGradientX[k], pGradientY[k]);
-				if (bin[index] < numThrehold){
-					bin[index]++;
-					gradientList[tmpCnt++] = gradientList[i];
-				}
-			}
-
-			//validNum = std::min( validNum, minDenseTrackingNum >> level ) ;
-			validNum = tmpCnt;
-
-			if (level == 0)//set the mask for dense BA
-			{
-				memset(maskGradientFiltering, false, sizeof(maskGradientFiltering));
-				for (int cnt = 0; cnt < validNum; cnt++){
-					int u = gradientList[cnt].u;
-					int v = gradientList[cnt].v;
-
-					gradientMapForDebug.at<Vec3b>(u, v)[0] = 0;
-					gradientMapForDebug.at<Vec3b>(u, v)[1] = 255;
-					gradientMapForDebug.at<Vec3b>(u, v)[2] = 0;
-
-					maskGradientFiltering[u][v] = true;
-				}
-			}
-
-			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
-			currentPixelInfo.piList.resize(3, validNum);
-			currentPixelInfo.Aij.clear();
-			currentPixelInfo.Aij.resize(validNum);
-			currentPixelInfo.AijTAij.clear();
-			currentPixelInfo.AijTAij.resize(validNum);
-			currentPixelInfo.intensity.clear();
-			currentPixelInfo.intensity.resize(validNum);
-
-			MatrixXd oneBytwo(1, 2);
-			MatrixXd twoBySix(2, 6);
-			MatrixXd oneBySix(1, 6);
-			MatrixXd oneBySixT(6, 1);
-			//			omp_set_num_threads(ompNumThreads);
-			//#pragma omp parallel for 
-
-			for (int cnt = 0; cnt < validNum; cnt++)
-			{
-				int u = gradientList[cnt].u;
-				int v = gradientList[cnt].v;
-
-				int k = INDEX(u, v, n, m);
-				double Z = pDepth[k];
-
-				double X = (v - para->cx[level]) * Z / para->fx[level];
-				double Y = (u - para->cy[level]) * Z / para->fy[level];
-
-				currentPixelInfo.piList(0, cnt) = X;
-				currentPixelInfo.piList(1, cnt) = Y;
-				currentPixelInfo.piList(2, cnt) = Z;
-				currentPixelInfo.intensity[cnt] = pIntensity[k];
-
-				oneBytwo(0, 0) = pGradientX[k];
-				oneBytwo(0, 1) = pGradientY[k];
-
-				//twoByThree(0, 0) = para->fx[level] / Z;
-				//twoByThree(0, 1) = 0;
-				//twoByThree(0, 2) = -X * para->fx[level] / SQ(Z);
-				//twoByThree(1, 0) = 0;
-				//twoByThree(1, 1) = para->fy[level] / Z;
-				//twoByThree(1, 2) = -Y * para->fy[level] / SQ(Z);
-
-				//threeBySix.topLeftCorner(3, 3) = Matrix3d::Identity();
-				//threeBySix(0, 3) = threeBySix(1, 4) = threeBySix(2, 5) = 0;
-				//threeBySix(0, 4) = Z;
-				//threeBySix(1, 3) = -Z;
-				//threeBySix(0, 5) = -Y;
-
-				//threeBySix(2, 3) = Y;
-				//threeBySix(1, 5) = X;
-				//threeBySix(2, 4) = -X;
-
-				twoBySix(0, 0) = para->fx[level] / Z;
-				twoBySix(0, 1) = 0;
-				twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
-				twoBySix(1, 0) = 0;
-				twoBySix(1, 1) = para->fy[level] / Z;
-				twoBySix(1, 2) = -Y * para->fy[level] / SQ(Z);
-
-				twoBySix(0, 3) = twoBySix(0, 2) * Y;
-				twoBySix(0, 4) = twoBySix(0, 0)*Z - twoBySix(0, 2)*X;
-				twoBySix(0, 5) = -twoBySix(0, 0)*Y;
-				twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y;
-				twoBySix(1, 4) = -twoBySix(1, 2)* X;
-				twoBySix(1, 5) = twoBySix(1, 1)* X;
-
-				oneBySix = oneBytwo*twoBySix;
-				oneBySixT = oneBySix.transpose();
-
-				//currentPixelInfo.Aij[k] = (oneBytwo*twoByThree*threeBySix).transpose();
-				currentPixelInfo.Aij[cnt] = oneBySixT;
-				currentPixelInfo.AijTAij[cnt] = oneBySixT * oneBySix;
-			}
-		}
-
-		//init the pose
-		current->R_k0 = R;
-		current->T_k0 = T;
-	}
-
-	void planeDection()
-	{
-		memset(mask, true, sizeof(mask));//clustering will be banned if false
-
-		//init the reprojection list
-		if (numOfState > 1){
-			checkNormalProjectionOnNewKeyFrame();
-		}
-
-		//init the superpixel
-		int iterNum = 5;
-		int K = expectedClusteringNum;
-		insertSuperpixel(K, iterNum);
-	}
-
-	double maxAbsValueOfVector(const VectorXd&a)
-	{
-		double maxValue = fabs(a(0));
-		for (int i = 1; i < 6; i++)
-		{
-			double tmp = fabs(a(i));
-			if (tmp > maxValue){
-				maxValue = tmp;
-			}
-		}
-		return maxValue;
-	}
-
-	Matrix3d vectorToSkewMatrix(const Vector3d& w)
-	{
-		Matrix3d skewW(3, 3);
-		skewW(0, 0) = skewW(1, 1) = skewW(2, 2) = 0;
-		skewW(0, 1) = -w(2);
-		skewW(1, 0) = w(2);
-		skewW(0, 2) = w(1);
-		skewW(2, 0) = -w(1);
-		skewW(1, 2) = -w(0);
-		skewW(2, 1) = w(0);
-
-		return skewW;
-	}
-
-	void updateR_T(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w, Matrix3d& incR, Vector3d& incT)
-	{
-		Matrix3d skewW = vectorToSkewMatrix(w);
-
-
-		double theta = sqrt(w.squaredNorm());
-		Matrix3d deltaR = Matrix3d::Identity() + (sin(theta) / theta)*skewW + ((1 - cos(theta)) / (theta*theta))*skewW*skewW;
-		Vector3d deltaT = (Matrix3d::Identity() + ((1 - cos(theta)) / (theta*theta)) *skewW + ((theta - sin(theta)) / (theta*theta*theta)*skewW*skewW)) * v;
-
-
-		//Matrix3d deltaR = Matrix3d::Identity() + skewW ;
-		//Vector3d deltaT = v;
-
-		//Matrix3d newR = R*deltaR.transpose();
-		//Vector3d newT = -R*deltaR.transpose()*deltaT + T;
-
-		Matrix3d newR = R*deltaR;
-		Vector3d newT = R*deltaT + T;
-
-		incT = incR*deltaT + incT;
-		incR = incR*deltaR;
-
-		R = newR;
-		T = newT;
-	}
-
-	void updateR_T_withoutScaling(Matrix3d& R, Vector3d& T, const Vector3d& v, const Vector3d& w, Matrix3d& incR, Vector3d& incT)
-	{
-		incR *= (Matrix3d::Identity() + vectorToSkewMatrix(w));
-		incT += v;
-
-		R *= (Matrix3d::Identity() + vectorToSkewMatrix(w));
-		T += v;
-	}
-
-        bool denseTrackingWithoutSuperpixel(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3d& R, Vector3d& T, Mat& trackingImage)
-	{
-		//no assumption on angular and linear velocity
-		Matrix3d tmpR = R;
-		Vector3d tmpT = T;
-		bool insertKeyFrameFlag = false;
-
-		//linear assumption on angular and linear velocity
-		//Matrix3d tmpR = last_delta_R * R ;
-		//Vector3d tmpT = last_delta_R * T + last_delta_T;
-
-		Matrix3d incR = Matrix3d::Identity();
-		Vector3d incT = Vector3d::Zero();
-		for (int level = maxPyramidLevel - 1; level >= 0; level--)
-		{
-			int n = height >> level;
-			int m = width >> level;
-			unsigned char *nextIntensity = (unsigned char*)grayImage[level].data;
-			PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
-			double lastError = 100000000000.0;
-			last_delta_v.Zero();
-			last_delta_w.Zero();
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  //camera parameters
+  int height, width;
+  CAMER_PARAMETERS* para;
+
+  //state sequences
+  int head, tail;
+  int numOfState;
+  STATE states[slidingWindowSize];
+
+  //for dense tracking
+  Vector3f last_delta_v, last_delta_w;
+  Matrix3f last_delta_R;
+  Vector3f last_delta_T;
+
+  //track the lastest state
+  Matrix3f R_k_2_c;//R_k^(k+1)
+  Vector3f T_k_2_c;//T_k^(k+1)
+  Vector3f v_c;
+
+  Vector3f gravity_b0;
+  float currentTime;
+
+  bool twoWayMarginalizatonFlag = false;//false, marginalize oldest; true, marginalize newest
+  bool mask[IMAGE_HEIGHT][IMAGE_WIDTH] ;
+
+  STATEESTIMATION(int hh, int ww, CAMER_PARAMETERS* p)
+  {
+    height = hh;
+    width = ww;
+    para = p;
+
+    initSlidingWindow();
+
+    last_delta_v.setZero();
+    last_delta_w.setZero();
+    last_delta_R.setIdentity();
+    last_delta_T.setZero();
+  }
+
+  ~STATEESTIMATION(){
+  }
+
+  void initSlidingWindow()
+  {
+    head = 0;
+    tail = -1;
+    for (int i = 0; i < slidingWindowSize; i++)
+    {
+      states[i].id = i;
+      //states[i].pts = NULL;
+      if (i + 1 < slidingWindowSize){
+        states[i].next = &states[i + 1];
+      }
+    }
+    states[slidingWindowSize - 1].next = &states[0];
+  }
+
+  STATE* getKeyFrame_ptr()
+  {
+    int i = tail;
+    while ( states[i].keyFrameFlag == false )
+    {
+      i--;
+      if (i < 0){
+        i += slidingWindowSize;
+      }
+    }
+    return &states[i];
+  }
+
+  void insertFrame(const Mat grayImage[maxPyramidLevel], const Matrix3f& R, const Vector3f& T, const Vector3f& vel )
+  {
+    tail++;
+    numOfState++;
+    if (tail >= slidingWindowSize){
+      tail -= slidingWindowSize;
+    }
+    STATE *current = &states[tail];
+
+    //copy the intensity
+    int n = height;
+    int m = width;
+    for (int i = 0; i < maxPyramidLevel; i++)
+    {
+      memcpy(current->intensity[i], (unsigned char*)grayImage[i].data, n*m*sizeof(unsigned char));
+      n >>= 1;
+      m >>= 1;
+    }
+
+    //init the state
+    current->R_bk_2_b0 = R;
+    current->T_bk_2_b0 = T;
+    current->v_bk = vel;
+
+    //set the keyFrameFlag
+    current->keyFrameFlag = false;
+ }
+
+  void prepareKeyFrame(STATE *current, const Mat depthImage[maxPyramidLevel],
+                       Mat& gradientMapForDebug )
+  {
+    current->keyFrameFlag = true;
+
+    //for debug purpose
+    {
+      int n = height;
+      int m = width;
+      n >>= beginPyramidLevel ;
+      m >>= beginPyramidLevel ;
+      gradientMapForDebug = Mat(n, m, CV_8UC3);
+      for (int i = 0; i < n; i++)
+      {
+        for (int j = 0; j < m; j++)
+        {
+          gradientMapForDebug.at<cv::Vec3b>(i, j)[0] = current->intensity[beginPyramidLevel][INDEX(i, j, n, m)];
+          gradientMapForDebug.at<cv::Vec3b>(i, j)[1] = current->intensity[beginPyramidLevel][INDEX(i, j, n, m)];
+          gradientMapForDebug.at<cv::Vec3b>(i, j)[2] = current->intensity[beginPyramidLevel][INDEX(i, j, n, m)];
+        }
+      }
+      //cv::cvtColor(grayImage[0], gradientMapForDebug, CV_GRAY2BGR);
+    }
+
+    int n = height;
+    int m = width;
+    //copy the depth image
+    for (int i = 0; i < maxPyramidLevel; i++)
+    {
+      memcpy(current->depthImage[i], (float*)depthImage[i].data, n*m*sizeof(float));
+      n >>= 1;
+      m >>= 1;
+    }
+
+    //init the graident map
+    current->computeGradientMap();
+
+    //init the pixel info in a frame
+    for (int level = maxPyramidLevel - 1; level >= beginPyramidLevel; level--)
+    {
+      int n = height >> level;
+      int m = width >> level;
+      float* pDepth = current->depthImage[level];
+      unsigned char*pIntensity = current->intensity[level];
+      float* pGradientX = current->gradientX[level];
+      float* pGradientY = current->gradientY[level];
+
+      int validNum = 0;
+      vector<GRADIENTNODE> gradientList(n*m);
+      for (int u = 0; u < n; u++)
+      {
+        for (int v = 0; v < m; v++)
+        {
+          int k = INDEX(u, v, n, m);
+          float Z = pDepth[k];
+          if ( Z < zeroThreshold ) {
+            continue;
+          }
+          if ( level <= 1 && SQ(pGradientX[k]) + SQ(pGradientY[k]) < graidientThreshold){
+            pDepth[k] = 0.0 ;
+            continue;
+          }
+          gradientList[validNum].cost = SQ(pGradientX[k]) + SQ(pGradientY[k]);
+          gradientList[validNum].u = u;
+          gradientList[validNum].v = v;
+          validNum++;
+        }
+      }
+      printf("dense tracking validNum: %d\n", validNum);
+
+//      sort(&gradientList[0], &gradientList[validNum]);
+
+//      int bin[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+//      int tmpCnt = 0;
+//      int numThrehold = (minDenseTrackingNum >> level) / 8;
+//      //int numThrehold = 1000000000 ;
+//      for (int i = 0; i < validNum; i++)
+//      {
+//        int u = gradientList[i].u;
+//        int v = gradientList[i].v;
+//        int k = INDEX(u, v, n, m);
+//        int index = angelSpace(pGradientX[k], pGradientY[k]);
+//        if (bin[index] < numThrehold){
+//          bin[index]++;
+//          gradientList[tmpCnt++] = gradientList[i];
+//        }
+//      }
+
+//      //validNum = std::min( validNum, minDenseTrackingNum >> level ) ;
+//      validNum = tmpCnt;
+
+      if (level == beginPyramidLevel)//set the mask for dense BA
+      {
+        for (int cnt = 0; cnt < validNum; cnt++){
+          int u = gradientList[cnt].u;
+          int v = gradientList[cnt].v;
+
+          gradientMapForDebug.at<Vec3b>(u, v)[0] = 0;
+          gradientMapForDebug.at<Vec3b>(u, v)[1] = 255;
+          gradientMapForDebug.at<Vec3b>(u, v)[2] = 0;
+        }
+      }
+
+      PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
+      currentPixelInfo.piList.resize(3, validNum);
+      currentPixelInfo.Aij.clear();
+      currentPixelInfo.Aij.resize(validNum);
+      currentPixelInfo.AijTAij.clear();
+      currentPixelInfo.AijTAij.resize(validNum);
+      currentPixelInfo.intensity.clear();
+      currentPixelInfo.intensity.resize(validNum);
+      currentPixelInfo.goodPixel.clear();
+      currentPixelInfo.goodPixel.resize(validNum);
+
+      MatrixXf oneBytwo(1, 2);
+      MatrixXf twoBySix(2, 6);
+      MatrixXf oneBySix(1, 6);
+      MatrixXf oneBySixT(6, 1);
+
+
+      omp_set_num_threads(ompNumThreads);
+      #pragma omp parallel for
+      for (int cnt = 0; cnt < validNum; cnt++)
+      {
+        int u = gradientList[cnt].u;
+        int v = gradientList[cnt].v;
+
+        int k = INDEX(u, v, n, m);
+        float Z = pDepth[k];
+
+        float X = (v - para->cx[level]) * Z / para->fx[level];
+        float Y = (u - para->cy[level]) * Z / para->fy[level];
+
+        currentPixelInfo.piList(0, cnt) = X;
+        currentPixelInfo.piList(1, cnt) = Y;
+        currentPixelInfo.piList(2, cnt) = Z;
+        currentPixelInfo.intensity[cnt] = pIntensity[k];
+        currentPixelInfo.goodPixel[cnt] = true ;
+
+        oneBytwo(0, 0) = pGradientX[k];
+        oneBytwo(0, 1) = pGradientY[k];
+
+        twoBySix(0, 0) = para->fx[level] / Z;
+        twoBySix(0, 1) = 0;
+        twoBySix(0, 2) = -X * para->fx[level] / SQ(Z);
+        twoBySix(1, 0) = 0;
+        twoBySix(1, 1) = para->fy[level] / Z;
+        twoBySix(1, 2) = -Y * para->fy[level] / SQ(Z);
+
+        twoBySix(0, 3) = twoBySix(0, 2) * Y;
+        twoBySix(0, 4) = twoBySix(0, 0)*Z - twoBySix(0, 2)*X;
+        twoBySix(0, 5) = -twoBySix(0, 0)*Y;
+        twoBySix(1, 3) = -twoBySix(1, 1)*Z + twoBySix(1, 2)*Y;
+        twoBySix(1, 4) = -twoBySix(1, 2)* X;
+        twoBySix(1, 5) = twoBySix(1, 1)* X;
+
+        oneBySix = oneBytwo*twoBySix;
+        oneBySixT = oneBySix.transpose();
+
+        currentPixelInfo.Aij[cnt] = oneBySixT;
+        currentPixelInfo.AijTAij[cnt] = oneBySixT * oneBySix;
+      }
+    }
+  }
+
+  float maxAbsValueOfVector(const VectorXf&a)
+  {
+    float maxValue = fabs(a(0));
+    for (int i = 1; i < 6; i++)
+    {
+      float tmp = fabs(a(i));
+      if (tmp > maxValue){
+        maxValue = tmp;
+      }
+    }
+    return maxValue;
+  }
+
+  Matrix3f vectorToSkewMatrix(const Vector3f& w)
+  {
+    Matrix3f skewW(3, 3);
+    skewW(0, 0) = skewW(1, 1) = skewW(2, 2) = 0;
+    skewW(0, 1) = -w(2);
+    skewW(1, 0) = w(2);
+    skewW(0, 2) = w(1);
+    skewW(2, 0) = -w(1);
+    skewW(1, 2) = -w(0);
+    skewW(2, 1) = w(0);
+
+    return skewW;
+  }
+
+  void updateR_T(Matrix3f& R, Vector3f& T, const Vector3f& v, const Vector3f& w, Matrix3f& incR, Vector3f& incT)
+  {
+    Matrix3f skewW = vectorToSkewMatrix(w);
+
+
+    float theta = sqrt(w.squaredNorm());
+    Matrix3f deltaR = Matrix3f::Identity() + (sin(theta) / theta)*skewW + ((1 - cos(theta)) / (theta*theta))*skewW*skewW;
+    Vector3f deltaT = (Matrix3f::Identity() + ((1 - cos(theta)) / (theta*theta)) *skewW + ((theta - sin(theta)) / (theta*theta*theta)*skewW*skewW)) * v;
+
+    Matrix3f newR = R*deltaR;
+    Vector3f newT = R*deltaT + T;
+
+    incT = incR*deltaT + incT;
+    incR = incR*deltaR;
+
+    R = newR;
+    T = newT;
+  }
+
+  float denseTrackingHuber(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3f& R, Vector3f& T, MatrixXf& lastestATA, float& averageResidial )
+  {
+    //no assumption on angular and linear velocity
+    Matrix3f tmpR = R;
+    Vector3f tmpT = T;
+    float validPercent = 0 ;
+    averageResidial = 1000000000.0 ;
+
+    //linear assumption on angular and linear velocity
+    //Matrix3f tmpR = last_delta_R * R ;
+    //Vector3f tmpT = last_delta_R * T + last_delta_T;
+
+    Matrix3f incR = Matrix3f::Identity();
+    Vector3f incT = Vector3f::Zero();
+    for (int level = maxPyramidLevel - 1; level >= beginPyramidLevel; level--)
+    {
+      int n = height >> level;
+      int m = width >> level;
+      unsigned char *nextIntensity = grayImage[level].data;
+      PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
+      float lastError = 100000000000.0;
+      last_delta_v.Zero();
+      last_delta_w.Zero();
+      int ith = 0 ;
+      for (; ith < maxIteration[level]; ith++)
+      {
+        int actualNum = 0;
+        int goodPixelNum = 0 ;
+        float currentError = 0;
+        MatrixXf ATA = MatrixXf::Zero(6, 6);
+        VectorXf ATb = VectorXf::Zero(6);
+        MatrixXf pi2List = tmpR * currentPixelInfo.piList;
+        int validNum = currentPixelInfo.intensity.size();
+
+        for (int i = 0; i < validNum; i++)
+        {
+          if ( currentPixelInfo.goodPixel[i] == false ){
+            continue ;
+          }
+          goodPixelNum++ ;
+          Vector3f p2 = pi2List.block(0, i, 3, 1) + tmpT;
+          //Vector3f p2 = tmpR* currentPixelInfo.piList.block(0, i, 3, 1) + tmpT;
 
 #ifdef DEBUG_DENSETRACKING
-			//if ( level == 0 )
-			//float* pDepth = current->depthImage[level];
-			//double* pGradientX = current->gradientX[level];
-			//double* pGradientY = current->gradientY[level];
-			unsigned char* pIntensity = current->intensity[level];
-			//double proportion = 0.3;
+          Vector3f p1 = currentPixelInfo.piList.block(0, i, 3, 1);
+          int u = int(p1(1)*para->fy[level] / p1(2) + para->cy[level] + 0.5);
+          int v = int(p1(0)*para->fx[level] / p1(2) + para->cx[level] + 0.5);
 
-			//Mat now(n, m, CV_8UC3);
-			Mat gradientMap(n, m, CV_8UC3);
-			Mat next;
-			Mat residualImage(n, m, CV_8U);
-			//cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
-			for (int i = 0; i < n; i++)
-			{
-				for (int j = 0; j < m; j++)
-				{
-					gradientMap.at<cv::Vec3b>(i, j)[0] = pIntensity[INDEX(i, j, n, m)];
-					gradientMap.at<cv::Vec3b>(i, j)[1] = pIntensity[INDEX(i, j, n, m)];
-					gradientMap.at<cv::Vec3b>(i, j)[2] = pIntensity[INDEX(i, j, n, m)];
-				}
-			}
-
+          gradientMap.at<cv::Vec3b>(u, v)[0] = 0;
+          gradientMap.at<cv::Vec3b>(u, v)[1] = 255;
+          gradientMap.at<cv::Vec3b>(u, v)[2] = 0;
 #endif
 
+          int u2 = int(p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5);
+          int v2 = int(p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5);
 
+          //float u2 = p2(1)*para->fy[level] / p2(2) + para->cy[level];
+          //float v2 = p2(0)*para->fx[level] / p2(2) + para->cx[level];
+          //float reprojectIntensity;
+          //if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
+          //	continue;
+          //}
+          if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
+            continue;
+          }
 
-			for (int ith = 0; ith < maxIteration; ith++)
-			{
-#ifdef DEBUG_DENSETRACKING
-				//cout << tmpR << endl;
-				//cout << tmpT << endl;
-				cv::cvtColor(grayImage[level], next, CV_GRAY2BGR);
+          //#ifdef DEBUG_DENSETRACKING
+          //						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
+          //						next.at<cv::Vec3b>(u2, v2)[1] = proportion*next.at<cv::Vec3b>(u2, v2)[1] + (1 - proportion) * G[pointsLabel[i]];
+          //						next.at<cv::Vec3b>(u2, v2)[2] = proportion*next.at<cv::Vec3b>(u2, v2)[2] + (1 - proportion) * B[pointsLabel[i]];
+          //#endif
 
-				for (int i = 0; i < n; i++)
-				{
-					for (int j = 0; j < m; j++)
-					{
-						residualImage.at<uchar>(i, j) = 0;
-					}
-				}
-#endif
-
-                                if ( level == 0 ){
-                                    cv::cvtColor(grayImage[0], trackingImage, CV_GRAY2BGR);
-                                }
-
-				int actualNum = 0;
-				double currentError = 0;
-				MatrixXd ATA = MatrixXd::Zero(6, 6);
-				VectorXd ATb = VectorXd::Zero(6);
-				MatrixXd pi2List = tmpR * currentPixelInfo.piList;
-
-				int validNum = currentPixelInfo.intensity.size();
-
-				for (int i = 0; i < validNum; i++)
-				{
-					Vector3d p2 = pi2List.block(0, i, 3, 1) + tmpT;
-					//Vector3d p2 = tmpR* currentPixelInfo.piList.block(0, i, 3, 1) + tmpT;
-
-
-#ifdef DEBUG_DENSETRACKING
-					Vector3d p1 = currentPixelInfo.piList.block(0, i, 3, 1);
-					int u = int(p1(1)*para->fy[level] / p1(2) + para->cy[level] + 0.5);
-					int v = int(p1(0)*para->fx[level] / p1(2) + para->cx[level] + 0.5);
-
-					gradientMap.at<cv::Vec3b>(u, v)[0] = 0;
-					gradientMap.at<cv::Vec3b>(u, v)[1] = 255;
-					gradientMap.at<cv::Vec3b>(u, v)[2] = 0;
-#endif
-
-					int u2 = int(p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5);
-					int v2 = int(p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5);
-
-					//double u2 = p2(1)*para->fy[level] / p2(2) + para->cy[level];
-					//double v2 = p2(0)*para->fx[level] / p2(2) + para->cx[level];
-					//double reprojectIntensity;
-					//if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
-					//	continue;
-					//}
-					if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-						continue;
-					}
-
-                                        if ( level == 0 )
-                                        {
-                                             Vector3d p1 = currentPixelInfo.piList.block(0, i, 3, 1);
-                                             int u = int(p1(1)*para->fy[level] / p1(2) + para->cy[level] + 0.5);
-                                             int v = int(p1(0)*para->fx[level] / p1(2) + para->cx[level] + 0.5);
-                                             line(trackingImage, Point2f(v, u), Point2f(v2, u2), Scalar(0, 255, 0), 1);
-                                             circle(trackingImage, Point2f(v2, u2), 3, Scalar(255, 0, 0));
-                                        }
-
-					//#ifdef DEBUG_DENSETRACKING
-					//						next.at<cv::Vec3b>(u2, v2)[0] = proportion*next.at<cv::Vec3b>(u2, v2)[0] + (1 - proportion) * R[pointsLabel[i]];
-					//						next.at<cv::Vec3b>(u2, v2)[1] = proportion*next.at<cv::Vec3b>(u2, v2)[1] + (1 - proportion) * G[pointsLabel[i]];
-					//						next.at<cv::Vec3b>(u2, v2)[2] = proportion*next.at<cv::Vec3b>(u2, v2)[2] + (1 - proportion) * B[pointsLabel[i]];
-					//#endif
-					double w = 1.0;
-					double r = currentPixelInfo.intensity[i] - nextIntensity[INDEX(u2, v2, n, m)];
-					//double r = currentPixelInfo.intensity[i] - reprojectIntensity;
-					double r_fabs = fabs(r);
+          float w = 1.0 ;
+          //float w = 1.0 /SQ(currentPixelInfo.piList(2, i));
+          float r = currentPixelInfo.intensity[i] - nextIntensity[INDEX(u2, v2, n, m)];
+          //float r = currentPixelInfo.intensity[i] - reprojectIntensity;
+          float r_fabs = fabs(r);
 
 #ifdef WEIGHTEDCOST
-					if (r_fabs > huberKernelThreshold){
-						w = huberKernelThreshold / (r_fabs);
-					}
+          if (r_fabs > huberKernelThreshold){
+            w *= huberKernelThreshold / (r_fabs);
+          }
 #endif
+
+          currentError += w*r_fabs;
+          actualNum++;
+
+          ATA += w*currentPixelInfo.AijTAij[i];
+          ATb -= (w*r)*currentPixelInfo.Aij[i];
+        }
+
+
+        validPercent = float(actualNum) / (n*m) ;
+        if (validPercent < 0.05 ){
+          return validPercent;
+        }
+        if ( float(actualNum) / goodPixelNum < 0.5 ){
+          return validPercent = 0 ;
+        }
+
+        currentError = averageResidial = currentError/actualNum ;
+        if (currentError > lastError){
+          //revert
+          updateR_T(tmpR, tmpT, -last_delta_v, -last_delta_w, incR, incT);
+          break;
+        }
+        else
+        {
+          if ( currentError / lastError > 0.999f ){
+            ith = maxIteration[level] ;
+          }
+          lastError = currentError;
+        }
+
+        LDLT<MatrixXf> ldltOfA = ATA.ldlt();
+        ComputationInfo info = ldltOfA.info();
+        if (info == Success)
+        {
+          lastestATA = ATA;
+
+          VectorXf x = ldltOfA.solve(ATb);
 
 #ifdef DEBUG_DENSETRACKING
-					residualImage.at<uchar>(u2, v2) = (uchar)r_fabs * 10;
+          MatrixXf L = lltOfA.matrixL();
+          cout << "currntError: " << currentError / actualNum << endl;
+          // cout << "lltofATA.L() " << ith << ":\n" <<  L << endl ;
+          // cout << "ATb " << ith << ":\n" << ATb << endl ;
+          // cout << "dx " << ith << ":\n" << x.transpose() << endl;
 #endif
-					currentError += w*r_fabs;
-					actualNum++;
+          //printf("x.norm()=%f\n", x.norm() );
+          Vector3f w, v;
+          v(0) = -x(0);
+          v(1) = -x(1);
+          v(2) = -x(2);
+          w(0) = -x(3);
+          w(1) = -x(4);
+          w(2) = -x(5);
+          updateR_T(tmpR, tmpT, v, w, incR, incT);
+          last_delta_v = v;
+          last_delta_w = w;
+        }
+        else {
+          ROS_WARN("level=%d, iter=%d can not solve Ax = b", level, ith );
+          ROS_WARN("actual=%d goodNum=%d\n", actualNum, goodPixelNum ) ;
+          break;
+        }
+      }//end of interation
+      printf("dT, lvl=%d iter=%d\n", level, ith ) ;
+    }//end of pyramid level
+    R = tmpR;
+    T = tmpT;
 
-					ATA += w*currentPixelInfo.AijTAij[i];
-					ATb -= (w*r)*currentPixelInfo.Aij[i];
-				}
+    return validPercent;
+  }
 
-#ifdef DEBUG_DENSETRACKING
-				cv::imshow("gradientMap", gradientMap);
-				cv::imshow("next", next);
+  void badPixelFiltering(STATE* current, const Mat grayImage[maxPyramidLevel], Matrix3f& R, Vector3f& T)
+  {
+    for (int level = maxPyramidLevel - 1; level >= beginPyramidLevel; level--)
+    {
+      int n = height >> level;
+      int m = width >> level;
+      unsigned char *nextIntensity = grayImage[level].data;
+      PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 
-				cv::Mat falsecolorsmap;
-				cv::applyColorMap(residualImage, falsecolorsmap, cv::COLORMAP_RAINBOW);
+      MatrixXf pi2List = R * currentPixelInfo.piList;
+      int validNum = currentPixelInfo.intensity.size();
 
-				char tmp[256];
-				sprintf(tmp, "Resid");
+      for (int i = 0; i < validNum; i++)
+      {
+        if ( currentPixelInfo.goodPixel[i] == false ){
+          continue ;
+        }
+        Vector3f p2 = pi2List.block(0, i, 3, 1) + T;
 
-				cv::imshow(tmp, falsecolorsmap);
+        int u2 = int(p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5);
+        int v2 = int(p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5);
 
-				cv::waitKey(500);
-#endif
+        if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
+          continue;
+        }
 
-				if (actualNum < 10)
-				{
-					if (level == 0){
-						insertKeyFrameFlag = true;
-					}
-					puts("Dense Tracking: lack of rank!break!");
-					break;
-				}
+        float r = currentPixelInfo.intensity[i] - nextIntensity[INDEX(u2, v2, n, m)];
+        //float r = currentPixelInfo.intensity[i] - reprojectIntensity;
+        float r_fabs = fabs(r);
 
-				if (level == 0 && (actualNum < (validNum >> 1) || actualNum < 1000)){
-					insertKeyFrameFlag = true;
-				}
+        if (r_fabs > huberKernelThreshold){
+          currentPixelInfo.goodPixel[i] = false ;
+        }
+      }
+    }//end of pyramid level
+  }
 
-				//        if (actualNum < (minDenseTrackingNum>>level) ){
-				//					puts("Dense Tracking: gradients are not rich!");
-				//					break;
-				//				}
+  void visualizeResidualMap(STATE* current, const Mat grayImage[maxPyramidLevel], const Matrix3f& R,const Vector3f& T, Mat& residualMap, Mat& display)
+  {
+    int level = beginPyramidLevel;
+    int n = height >> level;
+    int m = width >> level;
+    unsigned char *nextIntensity = grayImage[level].data;
+    PIXEL_INFO_IN_A_FRAME& currentPixelInfo = current->pixelInfo[level];
 
-				if (currentError > lastError){
-					//revert
-					updateR_T(tmpR, tmpT, -last_delta_v, -last_delta_w, incR, incT);
-					break;
-				}
-				else{
-					lastError = currentError;
-				}
+    MatrixXf pi2List = R * currentPixelInfo.piList;
+    int validNum = currentPixelInfo.intensity.size();
+    residualMap.setTo( uchar(0) ) ;
+    float max_r = 0.0 ;
+    for (int i = 0; i < validNum; i++)
+    {
+      if ( currentPixelInfo.goodPixel[i] == false ){
+        continue ;
+      }
+      Vector3f p2 = pi2List.block(0, i, 3, 1) + T;
 
-#ifdef ADD_VELOCITY_PRIOR
-				Sophus::SE3 inc(incR, incT);
-				VectorXd current_xi = inc.log().cast<double>();
+      int u2 = int(p2(1)*para->fy[level] / p2(2) + para->cy[level] + 0.5);
+      int v2 = int(p2(0)*para->fx[level] / p2(2) + para->cx[level] + 0.5);
 
-				ATA.block(0, 0, 3, 3) += weightLinearVel * Matrix3d::Identity();
-				ATA.block(3, 3, 3, 3) += weightRotationVel * Matrix3d::Identity();
-				ATb.segment(0, 3) -= weightLinearVel *current_xi.segment(0, 3);
-				ATb.segment(3, 3) -= weightRotationVel *current_xi.segment(3, 3);
-#endif
+      if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
+        continue;
+      }
 
-				LLT<MatrixXd> lltOfA = ATA.llt();
-				ComputationInfo info = lltOfA.info();
+      float r = currentPixelInfo.intensity[i] - nextIntensity[INDEX(u2, v2, n, m)];
+      //float r = currentPixelInfo.intensity[i] - reprojectIntensity;
+      float r_fabs = fabs(r)*10;
+      if ( r_fabs > max_r ){
+        max_r = r_fabs ;
+      }
+      residualMap.at<uchar>(u2, v2) = r_fabs>255?255:(uchar)r_fabs ;
+    }
+    applyColorMap(residualMap, display, COLORMAP_RAINBOW ) ;
+    //imshow("residualMap", residualMap ) ;
+  }
 
-				//printf("info:%d ith:%d actualNum:%d cnt:%d level:%d\n", info, ith, actualNum, cnt, level);
-				//cout << "ATA" << endl << ATA << endl;
-				//cout << "-ATb" << endl << ATb << endl;
-				if (info == Success)
-				{
-					VectorXd x = lltOfA.solve(ATb);
+  inline void insertMatrixToSparseMatrix(SparseMatrix<float>& to, const MatrixXf& from, int y, int x, int n, int m)
+  {
+    for (int i = 0; i < n; i++){
+      for (int j = 0; j < m; j++){
+        to.insert(y + i, x + j) = from(i, j);
+      }
+    }
+  }
 
-#ifdef DEBUG_DENSETRACKING
-					MatrixXd L = lltOfA.matrixL();
-					cout << "currntError: " << currentError / actualNum << endl;
-					// cout << "lltofATA.L() " << ith << ":\n" <<  L << endl ;
-					// cout << "ATb " << ith << ":\n" << ATb << endl ;
-					// cout << "dx " << ith << ":\n" << x.transpose() << endl;
-#endif
-					//printf("x.norm()=%f\n", x.norm() );
-					Vector3d w, v;
-					v(0) = -x(0);
-					v(1) = -x(1);
-					v(2) = -x(2);
-					w(0) = -x(3);
-					w(1) = -x(4);
-					w(2) = -x(5);
-					updateR_T(tmpR, tmpT, v, w, incR, incT);
-					last_delta_v = v;
-					last_delta_w = w;
-
-					//cout << tmpT.transpose() << endl ;
-
-					//#ifdef DEBUG_DENSETRACKING
-					//					printf("ith=%d num=%d norm=%f error=%f\n", ith, actualNum, x.norm(), currentError);
-					//#endif
-					//if ( maxAbsValueOfVector(x) < updateThreshold){
-					if (fabs(x(0)) < minimumUpdateTranslationThreshold
-						&& fabs(x(1)) < minimumUpdateTranslationThreshold
-						&& fabs(x(2)) < minimumUpdateTranslationThreshold
-						&& fabs(x(3)) < minimumUpdateAngularThreshold
-						&& fabs(x(4)) < minimumUpdateAngularThreshold
-						&& fabs(x(5)) < minimumUpdateAngularThreshold
-						){
-						break;
-					}
-				}
-				else {
-					puts("can not solve Ax = b");
-					break;
-				}
-			}//end of interation
-		}//end of pyramid level
-		R = tmpR;
-		T = tmpT;
-
-		return insertKeyFrameFlag;
-	}
-
-	void popOldestState()
-	{
-		numOfState--;
-
-		int nextStateID = head + 1;
-		if (nextStateID >= slidingWindowSize){
-			nextStateID -= slidingWindowSize;
-		}
-		std::list<SUPERPIXEL_IN_3D_SPACE>::iterator insertPos = superpixelList.begin();
-		while (insertPos != superpixelList.end())
-		{
-			if (insertPos->stateID != nextStateID){
-				insertPos++;
-			}
-			else {
-				break;
-			}
-		}
-
-		int n = height;
-		int m = width;
-		MatrixXd AT;
-		MatrixXd ATA;
-		LLT<MatrixXd> lltATA;
-		ComputationInfo info;
-		std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter = superpixelList.begin();
-		while (iter != insertPos)
-		{
-			bool flag = true;
-			//if (iter->reprojectList.size() <= 2){
-			//	iter = superpixelList.erase(iter);
-			//	continue;
-			//}
-
-			//reproject points within a local plane
-			int level = 0;
-			int currentStateID = iter->stateID;
-			SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
-			int sz = currentSuperpixel.listOfU_.size();
-			MatrixXd piList(3, sz);
-			VectorXd tt(MODEL_ORDER);
-			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-			{
-				double x = currentSuperpixel.listOfV_[i];
-				double y = currentSuperpixel.listOfU_[i];
-				tt(0) = 1.0;
-				tt(1) = x;
-				tt(2) = y;
-				if (MODEL_ORDER > 3){
-					tt(3) = x*y;
-				}
-
-				double lambda = tt.transpose() * iter->coefficients;
-				piList(0, i) = lambda * x;
-				piList(1, i) = lambda * y;
-				piList(2, i) = lambda;
-			}
-			int linkStateID = nextStateID;
-			unsigned char *nextIntensity = states[linkStateID].intensity[level];
-			Vector3d deltaT = states[linkStateID].R_k0.transpose()*(states[currentStateID].T_k0 - states[linkStateID].T_k0);
-			MatrixXd pjList = states[linkStateID].R_k0.transpose()*states[currentStateID].R_k0 * piList;
-
-			int totalNum = 0;
-			vector<bool>valid(sz);
-			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-			{
-				Vector3d pj = pjList.block(0, i, 3, 1) + deltaT;
-				if (pj(2) < zeroThreshold){
-					continue;
-				}
-				int u2 = int(pj(1)*para->fy[level] / pj(2) + para->cy[level] + 0.5);
-				int v2 = int(pj(0)*para->fx[level] / pj(2) + para->cx[level] + 0.5);
-
-				if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-					valid[i] = false;
-					continue;
-				}
-				valid[i] = true;
-				totalNum++;
-			}
-			if ( totalNum < minOptNum )
-			{
-				flag = false;
-				printf("[Pop out] StateID:%d Num:%d\n", iter->stateID, totalNum);
-				iter = superpixelList.erase(iter);
-				continue ;
-			}
-
-			//fitting the surface again
-			vector<unsigned char>tmpIntensity(sz);
-			std::copy(currentSuperpixel.intensity.begin(), currentSuperpixel.intensity.end(), tmpIntensity.begin());
-			currentSuperpixel.listOfV_.clear();
-			currentSuperpixel.listOfV_.reserve(totalNum);
-			currentSuperpixel.listOfU_.clear();
-			currentSuperpixel.listOfU_.reserve(totalNum);
-			currentSuperpixel.intensity.clear();
-			currentSuperpixel.intensity.reserve(totalNum);
-			iter->A.resize(totalNum, MODEL_ORDER);
-			iter->b.resize(totalNum);
-			int indexCnt = 0;
-			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-			{
-				if (valid[i] == false){
-					continue;
-				}
-				Vector3d pj = pjList.block(0, i, 3, 1) + deltaT;
-
-				valid[i] = true;
-				double x = pj(0) / pj(2);
-				double y = pj(1) / pj(2);
-				iter->A(indexCnt, 0) = 1.0;
-				iter->A(indexCnt, 1) = x;
-				iter->A(indexCnt, 2) = y;
-				if (MODEL_ORDER > 3){
-					iter->A(indexCnt, 3) = y*x;
-				}
-				iter->b(indexCnt) = pj(2);
-				currentSuperpixel.listOfV_.push_back(x);
-				currentSuperpixel.listOfU_.push_back(y);
-				currentSuperpixel.intensity.push_back(tmpIntensity[i]);
-				indexCnt++;
-			}
-
-			AT = iter->A.transpose();
-			ATA = AT*iter->A;
-			lltATA = ATA.llt();
-			info = lltATA.info();
-			if (info == Success)
-			{
-				iter->coefficients = lltATA.solve(AT* iter->b);
-
-				//change stateID
-				iter->stateID = nextStateID;
-				iter++;
-			}
-			else{
-				printf("[Pop out, fitting error] StateID:%d Num:%d\n", iter->stateID, totalNum);
-				iter = superpixelList.erase(iter);
-			}
-		}
-
-		//pop the oldest state
-		head++;
-		if (head >= slidingWindowSize){
-			head -= slidingWindowSize;
-		}
-	}
-
-	inline void insertMatrixToSparseMatrix(SparseMatrix<double>& to, const MatrixXd& from, int y, int x, int n, int m)
-	{
-		for (int i = 0; i < n; i++){
-			for (int j = 0; j < m; j++){
-				to.insert(y + i, x + j) = from(i, j);
-			}
-		}
-	}
-
-
-	void PhotometricBA()
-	{
-//		vector<Matrix3d>R(slidingWindowSize);
-//		vector<Vector3d>T(slidingWindowSize);
-//		for (int i = 0; i < slidingWindowSize; i++){
-//			R[i] = states[i].R_k0;
-//			T[i] = states[i].T_k0;
-//		}
-//		//SparseMatrix<double> priorMatrix(sizeOfH, sizeOfH);
-//		//insertMatrixToSparseMatrix(priorMatrix, 100000000.0*MatrixXd::Identity(6, 6), 6*head, 6*head, 6, 6);
-//		//VectorXd priorVector = VectorXd::Zero(sizeOfH);
-//
-//
-//		//Precheck the bundle adjustment reproject list
-//		int level = maxPyramidLevelBA - 1;
-//		int n = height >> level;
-//		int m = width >> level;
-//		int readyNum = 0;
-//
-//#ifdef DEBUG_BA
-//		Mat allSPs;
-//		RNG allSPsRNG(107);
-//#endif
-//
-//		printf("before precheck SP_NUM:%d\n", (int)superpixelList.size());
-//		for (std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter = superpixelList.begin();
-//			iter != superpixelList.end();)
-//		{
-//			if (iter->valid == false){
-//				iter = superpixelList.erase(iter);
-//				continue;
-//			}
-//			iter->ready = false;
-//
-//			int currentStateID = iter->stateID;
-//			const SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
-//			int sz = currentSuperpixel.listOfU_.size();
-//			Vector3d p0 = iter->pk[0] * iter->lambda[0];
-//			Vector3d p1 = iter->pk[1] * iter->lambda[1];
-//			Vector3d p2 = iter->pk[2] * iter->lambda[2];
-//			Vector3d p01 = p1 - p0;
-//			Vector3d p02 = p2 - p0;
-//			MatrixXd normalT = p01.cross(p02).transpose();
-//			MatrixXd numerotor = normalT*p0;
-//
-//			/*
-//#ifdef DEBUG_BA
-//			unsigned char *pIntensity = states[currentStateID].intensity[level];
-//
-//			int colorR = 0;
-//			int colorG = 255;
-//			int colorB = 0;
-//			double proportion = 0.3;
-//
-//			Mat currentImage(n, m, CV_8UC3);
-//			for (int iDebug = 0; iDebug < n; iDebug++)
-//			{
-//			for (int jDebug = 0; jDebug < m; jDebug++)
-//			{
-//			currentImage.at<cv::Vec3b>(iDebug, jDebug)[0] = pIntensity[INDEX(iDebug, jDebug, n, m)];
-//			currentImage.at<cv::Vec3b>(iDebug, jDebug)[1] = pIntensity[INDEX(iDebug, jDebug, n, m)];
-//			currentImage.at<cv::Vec3b>(iDebug, jDebug)[2] = pIntensity[INDEX(iDebug, jDebug, n, m)];
-//			}
-//			}
-//			//{
-//			//	int colorR = allSPsRNG.uniform(0, 255);
-//			//	int colorG = allSPsRNG.uniform(0, 255);
-//			//	int colrorB = allSPsRNG.uniform(0, 255);
-//			//	for (int i = 0; i < sz; i++)
-//			//	{
-//			//		Vector3d pi;
-//			//		pi << currentSuperpixel.listOfV_[i], currentSuperpixel.listOfU_[i], 1;
-//			//		int v = pi(0) * para->fx[level] / pi(2) + para->cx[level];
-//			//		int u = pi(1) * para->fy[level] / pi(2) + para->cy[level];
-//
-//			//		if (u < 0 || u >= n || v < 0 || v >= m) {
-//			//			continue;
-//			//		}
-//			//		currentImage.at<cv::Vec3b>(u, v)[0] = currentImage.at<cv::Vec3b>(u, v)[0] * proportion + colorR*(1 - proportion);
-//			//		currentImage.at<cv::Vec3b>(u, v)[1] = currentImage.at<cv::Vec3b>(u, v)[1] * proportion + colorG*(1 - proportion);
-//			//		currentImage.at<cv::Vec3b>(u, v)[2] = currentImage.at<cv::Vec3b>(u, v)[2] * proportion + colorB*(1 - proportion);
-//			//	}
-//			//}
-//			#endif
-//			*/
-//
-//			//already satisfy the dispartity citeria and valid pixel citeria
-//			if (iter->reprojectList.size() > 0)
-//			{
-//				iter->ready = true;
-//				readyNum++;
-//
-//				//check the valid pixel number within a superpixel
-//				MatrixXd u_e_List(3, sz);
-//				MatrixXd piList(3, sz);
-//				MatrixXd denorminatorList;
-//				for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-//				{
-//					u_e_List(0, i) = currentSuperpixel.listOfV_[i];
-//					u_e_List(1, i) = currentSuperpixel.listOfU_[i];
-//					u_e_List(2, i) = 1.0;
-//				}
-//				denorminatorList = normalT * u_e_List;
-//				for (int i = 0; i < sz; i++){
-//					piList.block(0, i, 3, 1) = (numerotor(0, 0) / denorminatorList(0, i)) * u_e_List.block(0, i, 3, 1);
-//				}
-//
-//				int linkStateID = tail;
-//				unsigned char *nextIntensity = states[linkStateID].intensity[level];
-//				Vector3d deltaT = R[linkStateID].transpose()*(T[currentStateID] - T[linkStateID]);
-//				MatrixXd pjList = R[linkStateID].transpose()*R[currentStateID] * piList;
-//
-//				int validNum = 0;
-//				for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-//				{
-//					Vector3d pj = pjList.block(0, i, 3, 1) + deltaT;
-//					if (pj(2) < zeroThreshold){
-//						continue;
-//					}
-//
-//					int u2 = int(pj(1)*para->fy[level] / pj(2) + para->cy[level] + 0.5);
-//					int v2 = int(pj(0)*para->fx[level] / pj(2) + para->cx[level] + 0.5);
-//					if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-//						continue;
-//					}
-//
-//					//double u2 = pj(1)*para->fy[level] / pj(2) + para->cy[level];
-//					//double v2 = pj(0)*para->fx[level] / pj(2) + para->cx[level];
-//					//double reprojectIntensity;
-//					//if (linearIntepolation(u2, v2, nextIntensity, n, m, reprojectIntensity) == false){
-//					//	continue;
-//					//}
-//
-//					double w = 1.0;
-//					double r = nextIntensity[INDEX(u2, v2, n, m)] - currentSuperpixel.intensity[i];
-//					//double r = reprojectIntensity - currentSuperpixel.intensity[i];
-//
-//					double r_fabs = fabs(r);
-//					if (r_fabs > huberKernelThreshold){
-//						w = huberKernelThreshold / r_fabs;
-//					}
-//					if (w > validPixelThreshold){
-//						validNum++;
-//					}
-//				}
-//				double currentValidPixelPercentage = double(validNum) / sz;
-//				if (currentValidPixelPercentage > validPixelPercentageThreshold){
-//					iter->reprojectList.push_back(linkStateID);
-//				}
-//				else{
-//				}
-//
-//				iter++;
-//				continue;
-//			}
-//
-//
-//
-//			//check and see if the lastest state satisfy the dispartity citeria and valid pixel citeria 
-//
-//			//1. check the disparity of support points
-//			bool flag = true;
-//			int linkStateID = tail;
-//
-//			for (int i = 0; i < 3; i++)
-//			{
-//				Vector3d reprojectNormalized_p2 = R[linkStateID].transpose()*(T[currentStateID] - T[linkStateID] + R[currentStateID] * iter->lambda[i] * iter->pk[i]);
-//				Vector3d reprojectNormalized_p = R[linkStateID].transpose()*(R[currentStateID] * iter->pk[i]);
-//				reprojectNormalized_p /= reprojectNormalized_p(2);
-//				reprojectNormalized_p2 /= reprojectNormalized_p2(2);
-//
-//				//printf("normalized parallex: %f\n", (reprojectNormalized_p - iter->pk[i]).norm());
-//				if ((reprojectNormalized_p - reprojectNormalized_p2).norm() < normalizedParallaxThreshold){
-//					flag = false;
-//				}
-//			}
-//			//for (int i = 0; i < 3; i++)
-//			//{				
-//			//	if ( (T[currentStateID] - T[linkStateID]).norm() / iter->lambda[i] < normalizedParallaxThreshold ){
-//			//		flag = false;
-//			//	}
-//			//}
-//
-//			if (flag == false){
-//				iter->ready = false;
-//				//puts("[DEBUG]");
-//
-//				iter++;
-//				continue;
-//			}
-//
-//			//2. check the valid pixel number within a superpixel
-//			MatrixXd u_e_List(3, sz);
-//			MatrixXd piList(3, sz);
-//			MatrixXd denorminatorList;
-//			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-//			{
-//				u_e_List(0, i) = currentSuperpixel.listOfV_[i];
-//				u_e_List(1, i) = currentSuperpixel.listOfU_[i];
-//				u_e_List(2, i) = 1.0;
-//			}
-//			denorminatorList = normalT * u_e_List;
-//			for (int i = 0; i < sz; i++){
-//				piList.block(0, i, 3, 1) = (numerotor(0, 0) / denorminatorList(0, i)) * u_e_List.block(0, i, 3, 1);
-//			}
-//
-//			unsigned char *nextIntensity = states[linkStateID].intensity[level];
-//			Vector3d deltaT = R[linkStateID].transpose()*(T[currentStateID] - T[linkStateID]);
-//			MatrixXd pjList = R[linkStateID].transpose()*R[currentStateID] * piList;
-//
-//			int validNum = 0;
-//			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-//			{
-//				Vector3d pj = pjList.block(0, i, 3, 1) + deltaT;
-//				if (pj(2) < zeroThreshold){
-//					continue;
-//				}
-//
-//				int u2 = int(pj(1)*para->fy[level] / pj(2) + para->cy[level] + 0.5);
-//				int v2 = int(pj(0)*para->fx[level] / pj(2) + para->cx[level] + 0.5);
-//
-//				if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-//					continue;
-//				}
-//
-//				double w = 1.0;
-//				double r = nextIntensity[INDEX(u2, v2, n, m)] - currentSuperpixel.intensity[i];
-//				double r_fabs = fabs(r);
-//				if (r_fabs > huberKernelThreshold){
-//					w = huberKernelThreshold / r_fabs;
-//				}
-//				if (w > validPixelThreshold){
-//					validNum++;
-//				}
-//			}
-//			double currentValidPixelPercentage = double(validNum) / sz;
-//			if (currentValidPixelPercentage > validPixelPercentageThreshold)
-//			{
-//				iter->ready = true;
-//				readyNum++;
-//
-//				int j = (tail - currentStateID);
-//				if (j <= 0){
-//					j += slidingWindowSize;
-//				}
-//
-//				for (int k = 1; k <= j; k++)
-//				{
-//					int tmpStateID = currentStateID + k;
-//					if (tmpStateID >= slidingWindowSize){
-//						tmpStateID -= slidingWindowSize;
-//					}
-//					iter->reprojectList.push_back(tmpStateID);
-//				}
-//			}
-//			else
-//			{
-//				iter->ready = false;
-//				//iter = superpixelList.erase(iter);
-//				//puts("[Pop Out in Data association!]");
-//			}
-//			iter++;
-//		}
-//		printf("after precheck ready SP_NUM:%d\n", readyNum);
-//
-//		if (readyNum < 1){
-//			puts("No ready Superpixels! Exit from BA!");
-//			return;
-//		}
-//
-//		//Begin Pyramid Bundle Adjustment
-//		for (level = maxPyramidLevelBA - 1; level >= 0; level--)
-//		{
-//			int n = height >> level;
-//			int m = width >> level;
-//			for (int iterNum = 0; iterNum < maxIterationBA; iterNum++)
-//			{
-//				//pre check valid superpixel
-//				int numOfValidSuperpixelsInSlidingWindow = 0;
-//				double minDist = DBL_MAX;
-//				int fixedIndexSP = -1;
-//				for (std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter = superpixelList.begin();
-//					iter != superpixelList.end();)
-//				{
-//					if (iter->valid == false){
-//						iter = superpixelList.erase(iter);
-//						continue;
-//					}
-//					if (iter->ready == false){
-//						iter++;
-//						continue;
-//					}
-//					if (iter->stateID == head)//only head frame should be considered
-//					{
-//						double tmpDist = (iter->lambda[0] + iter->lambda[1] + iter->lambda[2]) / 3.0;
-//						if (tmpDist < minDist){
-//							minDist = tmpDist;
-//							fixedIndexSP = numOfValidSuperpixelsInSlidingWindow;
-//						}
-//					}
-//					numOfValidSuperpixelsInSlidingWindow++;
-//					iter++;
-//				}
-//
-//#ifdef DEBUG_BA
-//				printf("numOfValidSuperpixels:%d\n", numOfValidSuperpixelsInSlidingWindow);
-//				RNG rng(666);
-//#endif
-//				//Begin Bundle Adjustment
-//				int sizeOfH = 6 * numOfState + 3 * numOfValidSuperpixelsInSlidingWindow;
-//				MatrixXd HTH = MatrixXd::Zero(sizeOfH, sizeOfH);
-//				VectorXd HTb = VectorXd::Zero(sizeOfH);
-//
-//				//TO CHECK
-//				int SuperpixelID = 0;
-//				double totalError = 0;
-//				for (std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter = superpixelList.begin();
-//					iter != superpixelList.end(); iter++)
-//				{
-//					if (iter->ready == false){
-//						continue;
-//					}
-//					//printf("SuperpixelID=%d reProjectListSz=%d\n", SuperpixelID, iter->reprojectList.size() );
-//
-//					int currentStateID = iter->stateID;
-//					const SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
-//					//					unsigned char* pIntensity = states[currentStateID].intensity[level];
-//					int sz = currentSuperpixel.listOfU_.size();
-//
-//#ifdef DEBUG_BA
-//					std::printf("SPID=%d\n", SuperpixelID);
-//					unsigned char *pIntensity = states[currentStateID].intensity[level];
-//
-//					int colorR = rng.uniform(0, 255);
-//					int colorG = rng.uniform(0, 255);
-//					int colorB = rng.uniform(0, 255);
-//					double proportion = 0.3;
-//
-//					Mat currentImage(n, m, CV_8UC3);
-//					Mat weightImage(n, m, CV_32F);
-//					for (int iDebug = 0; iDebug < n; iDebug++)
-//					{
-//						for (int jDebug = 0; jDebug < m; jDebug++)
-//						{
-//							currentImage.at<cv::Vec3b>(iDebug, jDebug)[0] = pIntensity[INDEX(iDebug, jDebug, n, m)];
-//							currentImage.at<cv::Vec3b>(iDebug, jDebug)[1] = pIntensity[INDEX(iDebug, jDebug, n, m)];
-//							currentImage.at<cv::Vec3b>(iDebug, jDebug)[2] = pIntensity[INDEX(iDebug, jDebug, n, m)];
-//							weightImage.at<float>(iDebug, jDebug) = 0;
-//						}
-//					}
-//
-//					std::printf("reProjectListSz=%d\n", iter->reprojectList.size());
-//					vector<Mat> reprojectImageSet(iter->reprojectList.size());
-//					for (int j = 0; j < iter->reprojectList.size(); j++)//reporject to frame j
-//					{
-//						int linkStateID = iter->reprojectList[j];
-//						//printf("%d\n", linkStateID);
-//						unsigned char *nextIntensity = states[linkStateID].intensity[level];
-//						double* nextGradientX = states[linkStateID].gradientX[level];
-//						double* nextGradientY = states[linkStateID].gradientY[level];
-//						Mat nextImage(n, m, CV_8UC3);
-//						for (int iDebug = 0; iDebug < n; iDebug++)
-//						{
-//							for (int jDebug = 0; jDebug < m; jDebug++)
-//							{
-//								nextImage.at<cv::Vec3b>(iDebug, jDebug)[0] = nextIntensity[INDEX(iDebug, jDebug, n, m)];
-//								nextImage.at<cv::Vec3b>(iDebug, jDebug)[1] = nextIntensity[INDEX(iDebug, jDebug, n, m)];
-//								nextImage.at<cv::Vec3b>(iDebug, jDebug)[2] = nextIntensity[INDEX(iDebug, jDebug, n, m)];
-//							}
-//						}
-//						reprojectImageSet[j] = nextImage;
-//					}
-//
-//					for (int i = 0; i < 3; i++)
-//					{
-//						int v = iter->pk[i](0) * para->fx[level] + para->cx[level] + 0.5 ;
-//						int u = iter->pk[i](1) * para->fy[level] + para->cy[level] + 0.5;
-//						circle(currentImage, Point(v, u), 5, Scalar(0, 255, 0), 2);
-//					}
-//#endif
-//
-//					Vector3d p0 = iter->pk[0] * iter->lambda[0];
-//					Vector3d p1 = iter->pk[1] * iter->lambda[1];
-//					Vector3d p2 = iter->pk[2] * iter->lambda[2];
-//					Vector3d p02 = p2 - p0;
-//					Vector3d p01 = p1 - p0;
-//					MatrixXd normalT = p02.cross(p01).transpose();
-//					MatrixXd numerotor = normalT*p0;
-//
-//					MatrixXd u_e_List(3, sz);
-//					MatrixXd piList(3, sz);
-//
-//					for (int i = 0; i < sz; i++){
-//						u_e_List(0, i) = currentSuperpixel.listOfV_[i];
-//						u_e_List(1, i) = currentSuperpixel.listOfU_[i];
-//						u_e_List(2, i) = 1.0;
-//					}
-//
-//					MatrixXd u1xu2_T_ue = iter->u1xu2_T*u_e_List;
-//					MatrixXd u0xu2_T_ue = iter->u0xu2_T*u_e_List;
-//					MatrixXd u0xu1_T_ue = iter->u0xu1_T*u_e_List;
-//					MatrixXd denorminatorList = normalT * u_e_List;
-//					VectorXd coefficient0(sz);
-//					VectorXd coefficient1(sz);
-//					VectorXd coefficient2(sz);
-//					for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-//					{
-//						piList.block(0, i, 3, 1) = (numerotor(0, 0) / denorminatorList(0, i)) * u_e_List.block(0, i, 3, 1);
-//
-//						coefficient0(i) = (
-//							iter->lambda[1] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
-//							- 2.0*iter->lambda[0] * iter->lambda[2] * iter->u0xu2_T_u0(0, 0)
-//							+ 2.0*iter->lambda[0] * iter->lambda[1] * iter->u0xu1_T_u0(0, 0)
-//							) * denorminatorList(0, i)
-//							- numerotor(0, 0) * (
-//							iter->lambda[1] * u0xu1_T_ue(0, i)
-//							- iter->lambda[2] * u0xu2_T_ue(0, i)
-//							) / SQ(denorminatorList(0, i));
-//
-//						coefficient1(i) = (
-//							iter->lambda[0] * iter->lambda[2] * iter->u1xu2_T_u0(0, 0)
-//							+ SQ(iter->lambda[0]) * iter->u0xu1_T_u0(0, 0)
-//							) * denorminatorList(0, i)
-//							- numerotor(0, 0) * (
-//							iter->lambda[2] * u1xu2_T_ue(0, i)
-//							+ iter->lambda[0] * u0xu1_T_ue(0, i)
-//							) / SQ(denorminatorList(0, i));
-//
-//						coefficient2(i) = (
-//							iter->lambda[0] * iter->lambda[1] * iter->u1xu2_T_u0(0, 0)
-//							- SQ(iter->lambda[0])* iter->u0xu2_T_u0(0, 0)
-//							) * denorminatorList(0, i)
-//							- numerotor(0, 0) * (
-//							iter->lambda[1] * u1xu2_T_ue(0, i)
-//							- iter->lambda[0] * u0xu2_T_ue(0, i)
-//							) / SQ(denorminatorList(0, i));
-//
-//#ifdef DEBUG_BA
-//						Vector3d pi = piList.block(0, i, 3, 1);
-//
-//						int u = int(pi(1)*para->fy[level] / pi(2) + para->cy[level] + 0.5);
-//						int v = int(pi(0)*para->fx[level] / pi(2) + para->cx[level] + 0.5);
-//
-//						if (!(u < 0 || u >= n || v < 0 || v >= m))
-//						{
-//							currentImage.at<Vec3b>(u, v)[0] = currentImage.at<Vec3b>(u, v)[0] * proportion + colorR * (1 - proportion);
-//							currentImage.at<Vec3b>(u, v)[1] = currentImage.at<Vec3b>(u, v)[1] * proportion + colorG * (1 - proportion);
-//							currentImage.at<Vec3b>(u, v)[2] = currentImage.at<Vec3b>(u, v)[2] * proportion + colorB * (1 - proportion);
-//						}
-//#endif
-//					}
-//
-//
-//
-//					int actualNum = 0;
-//					int reProjectListSz = iter->reprojectList.size();
-//					//						omp_set_num_threads(ompNumThreads);
-//					//#pragma omp parallel for
-//					for (int j = 0; j < reProjectListSz; j++)
-//					{
-//						int linkStateID = iter->reprojectList[j];
-//						unsigned char *nextIntensity = states[linkStateID].intensity[level];
-//						double* nextGradientX = states[linkStateID].gradientX[level];
-//						double* nextGradientY = states[linkStateID].gradientY[level];
-//
-//						//printf("linkStateID = %d\n", linkStateID);
-//
-//						MatrixXd Rji = R[linkStateID].transpose()*R[currentStateID];
-//						Vector3d deltaT = R[linkStateID].transpose()*(T[currentStateID] - T[linkStateID]);
-//						MatrixXd pjList = Rji * piList;
-//						MatrixXd u_e_j_List = Rji * u_e_List;
-//						for (int i = 0; i < sz; i++)
-//						{
-//							Vector3d pj = pjList.block(0, i, 3, 1) + deltaT;
-//
-//							if (pj(2) < zeroThreshold){
-//								continue;
-//							}
-//
-//							//printf("fx=%f fy=%f cx=%f cy=%f\n", para->fx[level], para->fy[level], para->cx[level], para->cy[level]);
-//
-//							int u2 = int(pj(1)*para->fy[level] / pj(2) + para->cy[level] + 0.5);
-//							int v2 = int(pj(0)*para->fx[level] / pj(2) + para->cx[level] + 0.5);
-//
-//							if (u2 < 0 || u2 >= n || v2 < 0 || v2 >= m){
-//								continue;
-//							}
-//
-//#ifdef DEBUG_BA
-//							reprojectImageSet[j].at<Vec3b>(u2, v2)[0] = reprojectImageSet[j].at<Vec3b>(u2, v2)[0] * proportion + colorR * (1 - proportion);
-//							reprojectImageSet[j].at<Vec3b>(u2, v2)[1] = reprojectImageSet[j].at<Vec3b>(u2, v2)[1] * proportion + colorG * (1 - proportion);
-//							reprojectImageSet[j].at<Vec3b>(u2, v2)[2] = reprojectImageSet[j].at<Vec3b>(u2, v2)[2] * proportion + colorB * (1 - proportion);
-//#endif
-//
-//							actualNum++;
-//
-//							double w = 1.0;
-//							double r = nextIntensity[INDEX(u2, v2, n, m)] - currentSuperpixel.intensity[i];
-//							double r_fabs = fabs(r);
-//							totalError += r_fabs;
-//
-//#ifdef WEIGHTEDCOST
-//							if (r_fabs > huberKernelThreshold){
-//								w = huberKernelThreshold / (r_fabs);
-//							}
-//#endif
-//
-//							MatrixXd oneByTwo(1, 2);
-//							oneByTwo << nextGradientX[INDEX(u2, v2, n, m)], nextGradientY[INDEX(u2, v2, n, m)];
-//
-//							MatrixXd twoByThree(2, 3);
-//							twoByThree << para->fx[level] / pj(2), 0, -pj(0)*para->fx[level] / SQ(pj(2)), 0, para->fy[level] / pj(2), -pj(1)*para->fy[level] / SQ(pj(2));
-//
-//							MatrixXd threeByFifteen(3, 15);
-//							//MatrixXd Rji = R[linkStateID].transpose()*R[currentStateID];
-//
-//							//1. xi
-//							threeByFifteen.block(0, 0, 3, 3) = R[linkStateID].transpose();
-//							threeByFifteen.block(0, 3, 3, 3) = -Rji * vectorToSkewMatrix(piList.block(0, i, 3, 1));
-//
-//							//2. xj
-//							threeByFifteen.block(0, 6, 3, 3) = -R[linkStateID].transpose();
-//							threeByFifteen.block(0, 9, 3, 3) = vectorToSkewMatrix(pj);
-//
-//							//3. yk
-//							threeByFifteen.block(0, 12, 3, 1) = coefficient0(i) * u_e_j_List.block(0, i, 3, 1);
-//							threeByFifteen.block(0, 13, 3, 1) = coefficient1(i)  * u_e_j_List.block(0, i, 3, 1);
-//							threeByFifteen.block(0, 14, 3, 1) = coefficient2(i)  * u_e_j_List.block(0, i, 3, 1);
-//
-//							MatrixXd oneByFifteen = oneByTwo*twoByThree*threeByFifteen;
-//							VectorXd oneByFifteenT = oneByFifteen.transpose();
-//							MatrixXd fifteenByFifteen = oneByFifteenT*oneByFifteen;
-//
-//							int updatePos = sizeOfH - 3 * (SuperpixelID + 1);
-//
-//							//#pragma omp critical
-//							{
-//								//1. related to xi
-//								HTH.block(currentStateID * 6, currentStateID * 6, 6, 6) += w* fifteenByFifteen.block(0, 0, 6, 6);
-//								HTH.block(currentStateID * 6, linkStateID * 6, 6, 6) += w* fifteenByFifteen.block(0, 6, 6, 6);
-//								HTH.block(currentStateID * 6, updatePos, 6, 3) += w* fifteenByFifteen.block(0, 12, 6, 3);
-//
-//								//2. related to xj
-//								HTH.block(linkStateID * 6, currentStateID * 6, 6, 6) += w* fifteenByFifteen.block(6, 0, 6, 6);
-//								HTH.block(linkStateID * 6, linkStateID * 6, 6, 6) += w* fifteenByFifteen.block(6, 6, 6, 6);
-//								HTH.block(linkStateID * 6, updatePos, 6, 3) += w* fifteenByFifteen.block(6, 12, 6, 3);
-//
-//								//3. related to yi
-//								HTH.block(updatePos, currentStateID * 6, 3, 6) += w* fifteenByFifteen.block(12, 0, 3, 6);
-//								HTH.block(updatePos, linkStateID * 6, 3, 6) += w* fifteenByFifteen.block(12, 6, 3, 6);
-//								HTH.block(updatePos, updatePos, 3, 3) += w* fifteenByFifteen.block(12, 12, 3, 3);
-//
-//								//4. HTb
-//								HTb.segment(currentStateID * 6, 6) -= (w*r)* oneByFifteenT.segment(0, 6);
-//								HTb.segment(linkStateID * 6, 6) -= (w*r)* oneByFifteenT.segment(6, 6);
-//								HTb.segment(updatePos, 3) -= (w*r)* oneByFifteenT.segment(12, 3);
-//							}
-//
-//						}//end of pixel within a superpixel
-//					}//end of reprojection
-//
-//					//cout << SuperpixelID << endl;
-//					//cout << HTH << endl;
-//					if (SuperpixelID == fixedIndexSP)//prior for the first frame depth
-//					{
-//#ifdef DEBUG_BA
-//						printf("fixedIndexSP:%d\n", fixedIndexSP);
-//#endif
-//						int updatePos = sizeOfH - 3 * (SuperpixelID + 1);
-//						for (int i = 0; i < 3; i++)
-//						{
-//							HTH(updatePos, updatePos) += SQ(1000000.0);
-//							updatePos++;
-//						}
-//					}
-//
-//#ifdef DEBUG_BA
-//					imshow("current", currentImage);
-//					cv::moveWindow("current", 0, 700);
-//					char ttt[128];
-//					for (int j = 0; j < reProjectListSz; j++)
-//					{
-//						sprintf(ttt, "%d", j);
-//						imshow(ttt, reprojectImageSet[j]);
-//						cv::moveWindow(ttt, j * 350, 0);
-//					}
-//					waitKey(0);
-//					//std::printf("level:%d iterNum:%d stateNum:%d SPNum:%d computeNum:%d\n", level, iterNum, numOfState, SuperpixelID, actualNum);
-//#endif
-//
-//					SuperpixelID++;
-//				}//end of superpixel
-//
-//				//prior for the oldest state
-//				int updatePos = head * 6;
-//				for (int i = 0; i < 6; i++)
-//				{
-//					HTH(updatePos, updatePos) += 10000000000.0*10000000000.0;
-//					updatePos++;
-//				}
-//
-//				std::printf("level:%d iterNum:%d stateNum:%d SPNum:%d\n", level, iterNum, numOfState, numOfValidSuperpixelsInSlidingWindow);
-//				//cout << HTH << endl;
-//				//cout << HTb << endl;
-//
-//				LLT<MatrixXd> lltHTH = HTH.llt();
-//				ComputationInfo info = lltHTH.info();
-//				//printf("actual num = %d total errors=%f\n", actualNum, totalError)
-//				if (info == Success)
-//				{
-//					VectorXd dx = lltHTH.solve(HTb);
-//
-//#ifdef DEBUG_BA
-//					cout << dx << endl;
-//#endif
-//
-//					int updatePos;
-//					bool flag = true;
-//
-//					//pre check
-//					updatePos = sizeOfH - 3;
-//					for (std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter = superpixelList.begin();
-//						iter != superpixelList.end(); iter++)
-//					{
-//						if (iter->ready == false){
-//							continue;
-//						}
-//						if (dx(updatePos) < iter->lambda[0] * dxOptProportion){
-//							;
-//						}
-//						else{
-//							iter->valid = false;
-//							flag = false;
-//						}
-//
-//						if (dx(updatePos + 1) < iter->lambda[1] * dxOptProportion){
-//							;
-//						}
-//						else{
-//							iter->valid = false;
-//							flag = false;
-//						}
-//
-//						if (dx(updatePos + 2) < iter->lambda[2] * dxOptProportion){
-//							;
-//						}
-//						else{
-//							iter->valid = false;
-//							flag = false;
-//						}
-//						updatePos -= 3;
-//					}
-//
-//					//pass the pre check
-//					if (flag == true)
-//					{
-//						//1. update state
-//						updatePos = 0;
-//						for (int i = 0; i < numOfState; i++)
-//						{
-//							T[i](0) += dx(updatePos);
-//							T[i](1) += dx(updatePos + 1);
-//							T[i](2) += dx(updatePos + 2);
-//
-//							Quaterniond q(R[i]);
-//							Quaterniond dq;
-//							dq.x() = dx(updatePos + 3) / 2;
-//							dq.y() = dx(updatePos + 4) / 2;
-//							dq.z() = dx(updatePos + 5) / 2;
-//							dq.w() = sqrt(1.0 - dq.x()*dq.x() - dq.y()*dq.y() - dq.z() * dq.z());
-//							R[i] = (q * dq).normalized().toRotationMatrix();
-//							//Vector3d theta;
-//							//theta << dx(updatePos + 3), dx(updatePos + 4), dx(updatePos + 5);
-//							//R[i] = R[i] * (Matrix3d::Identity() + vectorToSkewMatrix(theta));
-//
-//							//Matrix3d incR = Matrix3d::Identity() ;
-//							//Vector3d incT = Vector3d::Zero();
-//							//updateR_T(R[i], T[i], dx.segment(updatePos, 3), dx.segment(updatePos + 3, 3), incR, incT);
-//							updatePos += 6;
-//						}
-//
-//						//2. update superpixel
-//						updatePos = sizeOfH - 3;
-//						for (std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter = superpixelList.begin();
-//							iter != superpixelList.end(); iter++)
-//						{
-//							if (iter->ready == false){
-//								continue;
-//							}
-//							if (dx(updatePos) < iter->lambda[0] * dxOptProportion){
-//								iter->lambda[0] += dx(updatePos);
-//							}
-//							else{
-//								iter->valid = false;
-//								flag = false;
-//							}
-//
-//							if (dx(updatePos + 1) < iter->lambda[1] * dxOptProportion){
-//								iter->lambda[1] += dx(updatePos + 1);
-//							}
-//							else{
-//								iter->valid = false;
-//								flag = false;
-//							}
-//
-//							if (dx(updatePos + 2) < iter->lambda[2] * dxOptProportion){
-//								iter->lambda[2] += dx(updatePos + 2);
-//							}
-//							else{
-//								iter->valid = false;
-//								flag = false;
-//							}
-//							updatePos -= 3;
-//						}
-//					}
-//					else
-//					{
-//						iterNum--;
-//					}
-//				}
-//				else
-//				{
-//					puts("LLT error!!!");
-//					iterNum = maxIterationBA;
-//					//cout << HTH << endl;
-//				}
-//			}
-//		}
-//
-//		//after all the iterations done
-//		for (int i = 0; i < slidingWindowSize; i++){
-//			states[i].T_k0 = T[i];
-//			states[i].R_k0 = R[i];
-//		}
-	}
-
-	/*
-	void prepareDateForVisualization(vector<Vector3d>& pointcloud,
-		vector<unsigned short>& R,
-		vector<unsigned short>& G,
-		vector<unsigned short>& B,
-		vector<Vector3d>& ps,
-		vector<Matrix3d>& Rs)
-	{
-		ps.clear();
-		Rs.clear();
-		for (int i = 0; i < numOfState; i++)
-		{
-			int currentState = head + i;
-			if (currentState >= slidingWindowSize){
-				currentState -= slidingWindowSize;
-			}
-			ps.push_back(states[currentState].T_k0);
-			Rs.push_back(states[currentState].R_k0.transpose());
-		}
-
-		pointcloud.clear();
-		R.clear();
-		G.clear();
-		B.clear();
-		//		int n = height;
-		//		int m = width;
-		int level = 0;
-		std::list<SUPERPIXEL_IN_3D_SPACE>::iterator iter;
-		for (iter = superpixelList.begin(); iter != superpixelList.end(); iter++)
-		{
-			//			int currentStateID = iter->stateID;
-			const SUPERPIXEL_INFO& currentSuperpixel = iter->superpixelsInPyramid[level];
-
-			Vector3d p0 = iter->pk[0] * iter->lambda[0];
-			Vector3d p1 = iter->pk[1] * iter->lambda[1];
-			Vector3d p2 = iter->pk[2] * iter->lambda[2];
-			Vector3d p02 = p2 - p0;
-			Vector3d p01 = p1 - p0;
-			MatrixXd normalT = p02.cross(p01).transpose();
-			MatrixXd numerotor = normalT*p0;
-
-			//unsigned char* pIntensity = states[currentStateID].intensity[level];
-			int sz = currentSuperpixel.listOfU_.size();
-			for (int i = 0; i < sz; i++)//for every pixel within a superpixel
-			{
-				//int v = currentSuperpixel.listOfV[i];
-				//int u = currentSuperpixel.listOfU[i];
-				//double v_ = (coordinateX[level][v] - para->cx) / para->fx;
-				//double u_ = (coordinateY[level][u] - para->cy) / para->fy;
-				Vector3d u_e;
-				u_e << currentSuperpixel.listOfV_[i], currentSuperpixel.listOfU_[i], 1.0;
-
-				MatrixXd denorminator = normalT*u_e;
-				double lambda = numerotor(0, 0) / denorminator(0, 0);
-				Vector3d pi = lambda * u_e;
-
-				pointcloud.push_back(pi);
-				R.push_back(currentSuperpixel.intensity[i]);
-				G.push_back(currentSuperpixel.intensity[i]);
-				B.push_back(currentSuperpixel.intensity[i]);
-			}
-		}
-	}
-	*/
 };
 
 #endif
